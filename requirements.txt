@@ -1,0 +1,15 @@
+# Web framework & server
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+
+# Firebase Admin SDK (Realtime Database)
+firebase-admin==6.5.0
+
+# HTTP requests (OpenWeather API 4.0)
+requests==2.32.0
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Scheduling (periodic sensor/weather checks)
+schedule==1.2.2

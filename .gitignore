@@ -1,0 +1,40 @@
+# ===== Environment & Secrets =====
+.env
+.env.local
+.env.*.local
+*.pem
+serviceAccountKey.json
+firebase-adminsdk*.json
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# ===== Node / React (Vite) =====
+node_modules/
+website/dist/
+website/.env
+website/.env.local
+
+# ===== ESP32 / PlatformIO =====
+firmware/.pio/
+firmware/.vscode/
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===== Logs =====
+*.log
+npm-debug.log*

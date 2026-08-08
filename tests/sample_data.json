@@ -1,0 +1,61 @@
+{
+    "Input_Sensor": {
+        "device_001": {
+            "device_id": "device_001",
+            "timestamp": 1723104000,
+            "light_lux": 45000,
+            "humidity_percent": 62.5,
+            "sensor_status": {
+                "light_sensor": "active",
+                "humidity_sensor": "active"
+            }
+        }
+    },
+    "Input_Config": {
+        "device_001": {
+            "device_id": "device_001",
+            "updated_at": 1723100000,
+            "mode": "auto",
+            "schedule": {
+                "enabled": true,
+                "start_time": "06:00",
+                "end_time": "18:00",
+                "timezone": "Asia/Ho_Chi_Minh"
+            },
+            "thresholds": {
+                "minimum_light_lux": 10000,
+                "maximum_humidity_percent": 80
+            },
+            "weather": {
+                "enabled": true,
+                "rain_probability_threshold_percent": 50,
+                "forecast_within_minutes": 60
+            },
+            "monitoring": {
+                "sensor_check_interval_seconds": 30,
+                "weather_check_interval_minutes": 15
+            },
+            "notification": {
+                "enabled": true,
+                "rain_alert": true
+            }
+        }
+    },
+    "Output_State": {
+        "device_001": {
+            "device_id": "device_001",
+            "updated_at": 1723104060,
+            "rack_state": "extended",
+            "reason": "weather_clear_and_sunny"
+        }
+    },
+    "Output_Forecast": {
+        "notification_001": {
+            "device_id": "device_001",
+            "notified_at": 1723104120,
+            "reason": "rain_expected",
+            "rain_probability_percent": 75,
+            "forecast_within_minutes": 45
+        }
+    }
+}

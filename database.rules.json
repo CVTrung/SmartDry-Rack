@@ -1,0 +1,32 @@
+{
+    "rules": {
+        "Input_Sensor": {
+            "$device_id": {
+                ".read": "auth != null",
+                ".write": "auth != null",
+                ".validate": "newData.hasChildren(['device_id', 'timestamp', 'light_lux', 'humidity_percent', 'sensor_status']) && newData.child('device_id').val() === $device_id"
+            }
+        },
+        "Input_Config": {
+            "$device_id": {
+                ".read": "auth != null",
+                ".write": "auth != null",
+                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'mode']) && newData.child('device_id').val() === $device_id"
+            }
+        },
+        "Output_State": {
+            "$device_id": {
+                ".read": "auth != null",
+                ".write": "auth != null",
+                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'rack_state', 'reason']) && newData.child('device_id').val() === $device_id"
+            }
+        },
+        "Output_Forecast": {
+            "$notification_id": {
+                ".read": "auth != null",
+                ".write": "auth != null",
+                ".validate": "newData.hasChildren(['device_id', 'notified_at', 'reason', 'rain_probability_percent', 'forecast_within_minutes'])"
+            }
+        }
+    }
+}
