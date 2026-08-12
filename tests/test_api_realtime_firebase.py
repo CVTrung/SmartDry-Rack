@@ -2,7 +2,7 @@ import os
 import unittest
 import uuid
 
-from backend.firebase_service import FirebaseService
+from backend.realtime_firebase_service import FirebaseService
 
 
 RUN_INTEGRATION_TESTS = (

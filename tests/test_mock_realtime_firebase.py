@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from backend.firebase_service import FirebaseService
+from backend.realtime_firebase_service import FirebaseService
 
 
 class TestFirebaseInitialization(unittest.TestCase):

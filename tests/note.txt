@@ -3,3 +3,6 @@ Cài thư viện cho mock để test reponse giả:
 
 Lệnh test toàn bộ tests có trong folder:
     python -m unittest discover -s tests -p "test*.py"
+
+set PYTHONPATH=%CD%
+set ALLOW_FIREBASE_SAMPLE_WRITE=yes

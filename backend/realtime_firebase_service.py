@@ -16,7 +16,7 @@ class FirebaseServiceError(RuntimeError):
     """Lỗi khi khởi tạo hoặc sử dụng Firebase service."""
 
 
-class FirebaseService:
+class RealtimeFirebaseService:
     APP_NAME = "smartdry-backend"
 
     INPUT_SENSOR = "Input_Sensor"
