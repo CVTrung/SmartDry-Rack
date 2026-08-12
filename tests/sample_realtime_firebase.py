@@ -5,11 +5,11 @@ from typing import Any
 
 from firebase_admin import db
 
-from backend.firebase_service import FirebaseService
+from backend.firebase import RealtimeFirebaseService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SAMPLE_FILE = PROJECT_ROOT / "tests" / "sample_data.json"
+SAMPLE_FILE = PROJECT_ROOT / "tests" / "sample_realtime_firebase_data.json"
 
 
 def load_sample_data() -> dict[str, Any]:
@@ -21,7 +21,7 @@ def load_sample_data() -> dict[str, Any]:
 
     if not isinstance(data, dict):
         raise ValueError(
-            "sample_data.json must contain a JSON object"
+            "sample_realtime_firebase_data.json must contain a JSON object"
         )
 
     return data
@@ -33,13 +33,13 @@ def push_sample_data() -> None:
         "",
     )
 
-    if confirmation != "yes":
+    if confirmation != "1":
         raise RuntimeError(
             "Sample write was not confirmed. Set "
-            "ALLOW_FIREBASE_SAMPLE_WRITE=yes first."
+            "ALLOW_FIREBASE_SAMPLE_WRITE=1 first."
         )
 
-    service = FirebaseService.from_env()
+    service = RealtimeFirebaseService.from_env()
     sample = load_sample_data()
 
     normal_nodes = [

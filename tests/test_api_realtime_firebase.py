@@ -2,7 +2,7 @@ import os
 import unittest
 import uuid
 
-from backend.realtime_firebase_service import FirebaseService
+from backend.firebase import RealtimeFirebaseService
 
 
 RUN_INTEGRATION_TESTS = (
@@ -18,7 +18,7 @@ RUN_INTEGRATION_TESTS = (
 class TestFirebaseAPI(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.service = FirebaseService.from_env()
+        cls.service = RealtimeFirebaseService.from_env()
 
         unique_suffix = uuid.uuid4().hex[:10]
         cls.device_id = (

@@ -1,0 +1,95 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database
+  }/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnDevice(deviceId) {
+      return isSignedIn()
+        && request.auth.uid == deviceId;
+    }
+
+    function accountExists(deviceId) {
+      return exists(
+        /databases/$(database)/documents/accounts/$(deviceId)
+      );
+    }
+
+    function accountIsEnabled(deviceId) {
+      return accountExists(deviceId)
+        && get(
+          /databases/$(database)/documents/accounts/$(deviceId)
+        ).data.get('enabled', false) == true;
+    }
+
+    function canReadDevice(deviceId) {
+      return isOwnDevice(deviceId)
+        && accountIsEnabled(deviceId);
+    }
+
+    function hasValidQueryLimit() {
+      return request.query.limit != null
+        && request.query.limit > 0
+        && request.query.limit <= 100;
+    }
+    // Account profile:
+    // accounts/{device_id}
+    match /accounts/{deviceId
+    } {
+      allow get: if isOwnDevice(deviceId);
+      allow list: if false;
+
+      // Managed by the Python Firebase Admin SDK.
+      allow create, update, delete: if false;
+    }
+    // Device metadata:
+    // devices/{device_id}
+    match /devices/{deviceId
+    } {
+      allow get: if canReadDevice(deviceId);
+      allow list: if false;
+
+      // Managed by the Python Firebase Admin SDK.
+      allow create, update, delete: if false;
+
+      // Sensor readings, state/config changes and events.
+      match /device_history/{historyId
+      } {
+        allow get: if canReadDevice(deviceId);
+
+        allow list: if canReadDevice(deviceId)
+          && hasValidQueryLimit();
+
+        allow create, update, delete: if false;
+      }
+      // Website, physical-button and automatic commands.
+      match /command_history/{commandId
+      } {
+        allow get: if canReadDevice(deviceId);
+
+        allow list: if canReadDevice(deviceId)
+          && hasValidQueryLimit();
+
+        allow create, update, delete: if false;
+      }
+      // OpenWeather forecasts associated with this device.
+      match /forecast_history/{forecastId
+      } {
+        allow get: if canReadDevice(deviceId);
+
+        allow list: if canReadDevice(deviceId)
+          && hasValidQueryLimit();
+
+        allow create, update, delete: if false;
+      }
+    }
+    // Deny all unspecified collections and subcollections.
+    match /{document=**
+    } {
+      allow read, write: if false;
+    }
+  }
+}

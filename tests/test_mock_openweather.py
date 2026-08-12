@@ -12,7 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import requests
 
-from backend.openweather_service import (
+from backend.openweather import (
     OpenWeatherError,
     OpenWeatherService,
 )

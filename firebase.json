@@ -1,0 +1,9 @@
+{
+    "firestore": {
+        "rules": "backend/firebase/firebase_rules/firestore.rules",
+        "indexes": "backend/firebase/firebase_rules/firestore.indexes.json"
+    },
+    "database": {
+        "rules": "backend/firebase/firebase_rules/realtime_firebase.rules.json"
+    }
+}

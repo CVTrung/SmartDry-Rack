@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 
-from backend.openweather_service import (
+from backend.openweather import (
     OpenWeatherError,
     OpenWeatherService,
 )

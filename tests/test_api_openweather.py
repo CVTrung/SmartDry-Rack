@@ -1,9 +1,21 @@
+import os
 import unittest
 
 from fastapi.testclient import TestClient
 
 from backend.main import app
 
+RUN_INTEGRATION_TESTS = (
+    os.getenv("RUN_OPENWEATHER_INTEGRATION_TESTS")
+    == "1"
+)
+
+
+@unittest.skipUnless(
+    RUN_INTEGRATION_TESTS,
+    "Set RUN_OPENWEATHER_INTEGRATION_TESTS=1 "
+    "to run real OpenWeather tests",
+)
 
 class TestWeatherAPI(unittest.TestCase):
     @classmethod

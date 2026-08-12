@@ -1,0 +1,94 @@
+{
+    "account": {
+        "device_id": "device_sample_001",
+        "display_name": "SmartDry Sample Rack",
+        "enabled": true
+    },
+    "device_history": [
+        {
+            "record_type": "sensor",
+            "recorded_at": "2026-08-12T08:00:00+00:00",
+            "data": {
+                "light_lux": 45000,
+                "humidity_percent": 62.5,
+                "temperature_celsius": 31.2,
+                "rain_detected": false
+            }
+        },
+        {
+            "record_type": "state_change",
+            "recorded_at": "2026-08-12T08:05:00+00:00",
+            "data": {
+                "previous_state": "retracted",
+                "new_state": "extended",
+                "reason": "weather_clear",
+                "command_id": "sample_command_001",
+                "result": "success"
+            }
+        },
+        {
+            "record_type": "config_change",
+            "recorded_at": "2026-08-12T08:10:00+00:00",
+            "data": {
+                "previous": {
+                    "mode": "auto"
+                },
+                "current": {
+                    "mode": "manual"
+                },
+                "changed_by": "device_sample_001"
+            }
+        }
+    ],
+    "command_history": [
+        {
+            "command_id": "sample_command_001",
+            "action": "extend",
+            "source": "website",
+            "reason": "manual_user_request",
+            "status": "completed",
+            "requested_by": "device_sample_001",
+            "requested_at": "2026-08-12T08:05:00+00:00",
+            "result": {
+                "previous_state": "retracted",
+                "final_state": "extended",
+                "error_code": null
+            }
+        },
+        {
+            "command_id": "sample_button_001",
+            "action": "retract",
+            "source": "physical_button",
+            "reason": "local_button_press",
+            "status": "completed",
+            "requested_by": null,
+            "requested_at": "2026-08-12T09:00:00+00:00",
+            "result": {
+                "previous_state": "extended",
+                "final_state": "retracted",
+                "error_code": null
+            }
+        }
+    ],
+    "forecast_history": [
+        {
+            "forecast_at": "2026-08-12T12:00:00+00:00",
+            "expires_at": "2026-08-13T12:00:00+00:00",
+            "source": "openweather",
+            "location": {
+                "name": "Ho Chi Minh City",
+                "latitude": 10.8231,
+                "longitude": 106.6297
+            },
+            "weather": {
+                "condition": "Rain",
+                "description": "light rain",
+                "temperature_celsius": 29.5,
+                "humidity_percent": 82,
+                "rain_probability_percent": 75,
+                "rain_amount_mm": 2.4,
+                "cloud_cover_percent": 90
+            }
+        }
+    ]
+}

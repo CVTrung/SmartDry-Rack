@@ -1,0 +1,33 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "device_history",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "record_type",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "recorded_at",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "command_history",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "source",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "requested_at",
+                    "order": "DESCENDING"
+                }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}
