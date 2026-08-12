@@ -1,31 +1,121 @@
 {
     "rules": {
+        "Device_Accounts": {
+            "$device_id": {
+                ".read": "auth != null && auth.uid === $device_id",
+                ".write": false,
+                ".validate": "newData.hasChildren(['device_id', 'display_name', 'created_at', 'enabled']) && newData.child('device_id').val() === $device_id",
+                "device_id": {
+                    ".validate": "newData.isString()"
+                },
+                "display_name": {
+                    ".validate": "newData.isString() && newData.val().length <= 100"
+                },
+                "created_at": {
+                    ".validate": "newData.isNumber() && newData.val() > 0"
+                },
+                "enabled": {
+                    ".validate": "newData.isBoolean()"
+                },
+                "$other": {
+                    ".validate": false
+                }
+            }
+        },
         "Input_Sensor": {
             "$device_id": {
-                ".read": "auth != null",
-                ".write": "auth != null",
-                ".validate": "newData.hasChildren(['device_id', 'timestamp', 'light_lux', 'humidity_percent', 'sensor_status']) && newData.child('device_id').val() === $device_id"
+                ".read": "auth != null && auth.uid === $device_id",
+                ".write": "auth != null && auth.uid === $device_id && newData.exists()",
+                ".validate": "newData.hasChildren(['device_id', 'timestamp', 'light_lux', 'humidity_percent', 'temperature_celsius', 'rain_detected']) && newData.child('device_id').val() === $device_id",
+                "device_id": {
+                    ".validate": "newData.isString()"
+                },
+                "timestamp": {
+                    ".validate": "newData.isNumber() && newData.val() > 0"
+                },
+                "light_lux": {
+                    ".validate": "newData.isNumber() && newData.val() >= 0"
+                },
+                "humidity_percent": {
+                    ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+                },
+                "temperature_celsius": {
+                    ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 85"
+                },
+                "rain_detected": {
+                    ".validate": "newData.isBoolean()"
+                },
+                "$other": {
+                    ".validate": false
+                }
             }
         },
         "Input_Config": {
             "$device_id": {
-                ".read": "auth != null",
-                ".write": "auth != null",
-                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'mode']) && newData.child('device_id').val() === $device_id"
+                ".read": "auth != null && auth.uid === $device_id",
+                ".write": "auth != null && auth.uid === $device_id && newData.exists()",
+                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'mode']) && newData.child('device_id').val() === $device_id",
+                "device_id": {
+                    ".validate": "newData.isString()"
+                },
+                "updated_at": {
+                    ".validate": "newData.isNumber() && newData.val() > 0"
+                },
+                "mode": {
+                    ".validate": "newData.isString() && (newData.val() === 'auto' || newData.val() === 'manual')"
+                },
+                "$other": {
+                    ".validate": false
+                }
             }
         },
         "Output_State": {
             "$device_id": {
-                ".read": "auth != null",
-                ".write": "auth != null",
-                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'rack_state', 'reason']) && newData.child('device_id').val() === $device_id"
+                ".read": "auth != null && auth.uid === $device_id",
+                ".write": false,
+                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'rack_state', 'reason']) && newData.child('device_id').val() === $device_id",
+                "device_id": {
+                    ".validate": "newData.isString()"
+                },
+                "updated_at": {
+                    ".validate": "newData.isNumber() && newData.val() > 0"
+                },
+                "rack_state": {
+                    ".validate": "newData.isString() && (newData.val() === 'extended' || newData.val() === 'retracted' || newData.val() === 'error')"
+                },
+                "reason": {
+                    ".validate": "newData.isString() && newData.val().length <= 200"
+                },
+                "$other": {
+                    ".validate": false
+                }
             }
         },
         "Output_Forecast": {
-            "$notification_id": {
-                ".read": "auth != null",
-                ".write": "auth != null",
-                ".validate": "newData.hasChildren(['device_id', 'notified_at', 'reason', 'rain_probability_percent', 'forecast_within_minutes'])"
+            "$device_id": {
+                "$notification_id": {
+                    ".read": "auth != null && auth.uid === $device_id",
+                    ".write": "auth != null && auth.uid === $device_id && newData.exists()",
+                    ".validate": "newData.hasChildren(['device_id', 'notified_at', 'reason', 'forecast_within_minutes']) && newData.child('device_id').val() === $device_id",
+                    "device_id": {
+                        ".validate": "newData.isString()"
+                    },
+                    "notified_at": {
+                        ".validate": "newData.isNumber() && newData.val() > 0"
+                    },
+                    "reason": {
+                        ".validate": "newData.isString() && newData.val().length <= 200"
+                    },
+                    "rain_probability_percent": {
+                        ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+                    },
+                    "forecast_within_minutes": {
+                        ".validate": "newData.isNumber() && newData.val() >= 0"
+                    },
+                    "$other": {
+                        ".validate": false
+                    }
+                }
             }
         }
     }

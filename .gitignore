@@ -38,3 +38,10 @@ Thumbs.db
 # ===== Logs =====
 *.log
 npm-debug.log*
+
+# ===== Secrets ======
+secrets/
+*.pem
+*.key
+*-firebase-adminsdk-*.json
+serviceAccountKey.json

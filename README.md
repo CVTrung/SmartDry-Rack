@@ -1,4 +1,4 @@
-# Thiết Bị Phơi Đồ Thông Minh (Smart Clothes Drying Rack)
+# Thiết Bị Phơi Đồ Thông Minh (SmartDry-Rack)
 
 An IoT-based smart clothes drying system that automatically extends/retracts
 a drying rack based on weather conditions, light, and humidity sensor data.
@@ -10,7 +10,7 @@ a drying rack based on weather conditions, light, and humidity sensor data.
 | Website    | React (Vite) + Firebase SDK         |
 | Backend    | Python 3.13 + FastAPI               |
 | Database   | Firebase Realtime Database           |
-| Weather    | OpenWeather One Call API 4.0         |
+| Weather    | OpenWeather Current Weather API and 5 Day / 3 Hour Forecast API        |
 | Firmware   | ESP32 (PlatformIO / Arduino)         |
 
 ## Project Structure

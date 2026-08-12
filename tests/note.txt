@@ -1,0 +1,5 @@
+Cài thư viện cho mock để test reponse giả: 
+    pip install httpx
+
+Lệnh test toàn bộ tests có trong folder:
+    python -m unittest discover -s tests -p "test*.py"
