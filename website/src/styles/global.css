@@ -1,0 +1,256 @@
+:root {
+  color: #1f2937;
+  background: #f5f6f8;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.center-page,
+.login-page,
+.dashboard-placeholder {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(100%, 380px);
+  padding: 32px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 8%);
+}
+
+.brand-mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 20px;
+  place-items: center;
+  border-radius: 12px;
+  color: #ffffff;
+  background: #ea580c;
+  font-weight: 800;
+}
+
+h1 {
+  margin: 0;
+  color: #111827;
+  font-size: 1.6rem;
+}
+
+.login-subtitle {
+  margin: 8px 0 28px;
+  color: #6b7280;
+}
+
+form {
+  display: grid;
+  gap: 10px;
+}
+
+label {
+  margin-top: 6px;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+}
+
+input:focus {
+  border-color: #ea580c;
+  box-shadow: 0 0 0 3px rgb(234 88 12 / 15%);
+}
+
+button {
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #ea580c;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #c2410c;
+}
+
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.form-error {
+  margin: 4px 0 0;
+  color: #b91c1c;
+  font-size: 0.9rem;
+}
+
+.dashboard-placeholder .login-card {
+  text-align: center;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto minmax(140px, 1fr);
+  align-items: center;
+  gap: 20px;
+  min-height: 72px;
+  padding: 12px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 2px 12px rgb(15 23 42 / 5%);
+}
+
+.user-label {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.user-label strong {
+  overflow: hidden;
+  color: #111827;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.primary-navigation {
+  display: flex;
+  gap: 4px;
+}
+
+.navigation-link {
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: #4b5563;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.navigation-link:hover {
+  color: #c2410c;
+  background: #fff7ed;
+}
+
+.navigation-link.active {
+  color: #ffffff;
+  background: #ea580c;
+}
+
+.navigation-link:focus-visible,
+.logout-button:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 3px;
+}
+
+.logout-button {
+  justify-self: end;
+  min-height: 40px;
+  margin: 0;
+  padding: 8px 14px;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+  background: #ffffff;
+}
+
+.logout-button:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: #c2410c;
+  background: #c2410c;
+}
+
+.page-content {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.page-placeholder {
+  min-height: 240px;
+  padding: 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.page-placeholder p {
+  margin: 10px 0 0;
+  color: #6b7280;
+}
+
+.layout-error {
+  margin: 12px auto 0;
+  padding: 0 24px;
+  color: #b91c1c;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .top-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 16px;
+    padding: 12px 16px;
+  }
+
+  .primary-navigation {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    overflow-x: auto;
+    padding: 2px 0 6px;
+    scrollbar-width: thin;
+  }
+
+  .page-content {
+    padding: 24px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 24px;
+  }
+
+  .logout-button {
+    padding: 8px 12px;
+  }
+}
