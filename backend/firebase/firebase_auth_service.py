@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from firebase_admin import auth
@@ -7,6 +8,7 @@ from backend.firebase.firestore_service import (
     FirestoreService,
 )
 
+DEVICE_ID_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 
 class FirebaseAuthService:
     LOGIN_EMAIL_DOMAIN = "smartdry.local"
@@ -33,14 +35,10 @@ class FirebaseAuthService:
                 "device_id must not be empty"
             )
 
-        invalid_characters = ".#$[]/"
-
-        if any(
-            character in device_id
-            for character in invalid_characters
-        ):
+        if not DEVICE_ID_PATTERN.fullmatch(device_id):
             raise ValueError(
-                "device_id must not contain . # $ [ ] or /"
+                "device_id may only contain lowercase letters, "
+                "numbers, hyphens, and underscores"
             )
 
         if len(device_id) > 128:
@@ -203,3 +201,31 @@ class FirebaseAuthService:
             },
             app=self.app,
         )
+
+    def get_account_from_id_token(
+        self,
+        id_token: str,
+    ) -> dict[str, Any]:
+        decoded_token = self.verify_id_token(
+            id_token,
+            check_revoked=True,
+        )
+
+        device_id = decoded_token["uid"]
+        account = self.firestore.get_account(device_id)
+
+        if not account:
+            raise PermissionError(
+                "Device account does not exist"
+            )
+
+        if account.get("enabled") is not True:
+            raise PermissionError(
+                "Device account is disabled"
+            )
+
+        return {
+            "device_id": device_id,
+            "display_name": account.get("display_name", device_id),
+            "enabled": True,
+        }

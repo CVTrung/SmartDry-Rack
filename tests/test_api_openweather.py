@@ -3,6 +3,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from backend.auth_dependency import get_current_account
 from backend.main import app
 
 RUN_INTEGRATION_TESTS = (
@@ -20,7 +21,20 @@ RUN_INTEGRATION_TESTS = (
 class TestWeatherAPI(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        app.dependency_overrides[get_current_account] = lambda: {
+            "device_id": "test_device",
+            "display_name": "Test Device",
+            "enabled": True,
+        }
+
         cls.client = TestClient(app)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        app.dependency_overrides.pop(
+            get_current_account,
+            None,
+        )
 
     def test_get_current_weather_from_real_api(self) -> None:
         response = self.client.get("/api/weather/current")

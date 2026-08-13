@@ -3,7 +3,6 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
-import { get, ref } from 'firebase/database';
 
 import {
   auth,
@@ -11,18 +10,23 @@ import {
   isFirebaseConfigured,
 } from '../firebase.js';
 
-const INVALID_FIREBASE_KEY_CHARACTERS = /[.#$[\]\/]/;
+const DEVICE_ID_PATTERN = /^[a-z0-9_-]+$/;
 const DEVICE_EMAIL_SUFFIX = '@smartdry.local';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL
+  || 'http://localhost:8000';
 
 export function normalizeDeviceId(value) {
-  const deviceId = value.trim();
+  const deviceId = value.trim().toLowerCase();
 
   if (!deviceId) {
     throw new Error('Vui lòng nhập Device ID.');
   }
 
-  if (INVALID_FIREBASE_KEY_CHARACTERS.test(deviceId)) {
-    throw new Error('Device ID không được chứa . # $ [ ] hoặc /.');
+  if (!DEVICE_ID_PATTERN.test(deviceId)) {
+    throw new Error(
+      'Device ID chỉ được chứa chữ thường, số, dấu gạch ngang và dấu gạch dưới.',
+    );
   }
 
   return deviceId;
@@ -37,18 +41,6 @@ function assertFirebaseConfigured() {
 export function mapDeviceIdToEmail(value) {
   const deviceId = normalizeDeviceId(value);
   return `${deviceId}${DEVICE_EMAIL_SUFFIX}`;
-}
-
-function getDeviceIdFromUser(user) {
-  const email = user.email?.trim().toLowerCase();
-
-  if (!email?.endsWith(DEVICE_EMAIL_SUFFIX)) {
-    throw new Error('Tài khoản không thuộc hệ thống SmartDry.');
-  }
-
-  return normalizeDeviceId(
-    email.slice(0, -DEVICE_EMAIL_SUFFIX.length),
-  );
 }
 
 function getLoginError(error) {
@@ -75,27 +67,41 @@ function getLoginError(error) {
 }
 
 async function loadDeviceAccount(user, expectedDeviceId) {
-  const deviceId = expectedDeviceId
-    ? normalizeDeviceId(expectedDeviceId)
-    : getDeviceIdFromUser(user);
+  const idToken = await user.getIdToken();
 
-  if (user.email?.toLowerCase() !== mapDeviceIdToEmail(deviceId).toLowerCase()) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/auth/me`,
+    {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    },
+  );
+
+  if (response.status === 401 || response.status === 403) {
+    await firebaseSignOut(auth);
+    throw new Error(
+      'Tài khoản không tồn tại hoặc đã bị vô hiệu hóa.',
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      'Không thể kiểm tra tài khoản với máy chủ.',
+    );
+  }
+
+  const account = await response.json();
+
+  if (
+    expectedDeviceId
+    && account.device_id !== normalizeDeviceId(expectedDeviceId)
+  ) {
     await firebaseSignOut(auth);
     throw new Error('Device ID hoặc mật khẩu không đúng.');
   }
 
-  const snapshot = await get(ref(database, `Device_Accounts/${deviceId}`));
-  const account = snapshot.val();
-
-  if (!account || account.enabled !== true) {
-    await firebaseSignOut(auth);
-    throw new Error('Thiết bị không tồn tại hoặc đã bị vô hiệu hóa.');
-  }
-
-  return {
-    ...account,
-    device_id: deviceId,
-  };
+  return account;
 }
 
 export async function loginWithDeviceId(rawDeviceId, password) {
@@ -114,7 +120,10 @@ export async function loginWithDeviceId(rawDeviceId, password) {
       password,
     );
 
-    return await loadDeviceAccount(credential.user, deviceId);
+    return await loadDeviceAccount(
+      credential.user,
+      deviceId,
+    );
   } catch (error) {
     throw getLoginError(error);
   }
@@ -123,7 +132,7 @@ export async function loginWithDeviceId(rawDeviceId, password) {
 export function observeAuthState(callback) {
   if (!isFirebaseConfigured || !auth || !database) {
     callback(null);
-    return () => {};
+    return () => { };
   }
 
   return onAuthStateChanged(auth, async (firebaseUser) => {
