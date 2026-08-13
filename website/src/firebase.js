@@ -1,52 +1,26 @@
-import { initializeApp } from "firebase/app";
-import {
-    getAuth,
-    signInWithEmailAndPassword,
-    signOut,
-} from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-
+import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
     projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
     storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId:
-        import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
     appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-const firebaseApp = initializeApp(firebaseConfig);
+export const isFirebaseConfigured = [
+    firebaseConfig.apiKey,
+    firebaseConfig.authDomain,
+    firebaseConfig.databaseURL,
+    firebaseConfig.projectId,
+    firebaseConfig.appId,
+].every(Boolean);
 
-export const firebaseAuth = getAuth(firebaseApp);
-export const firestoreDatabase = getFirestore(firebaseApp);
+const firebaseApp = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 
-function normalizeDeviceId(deviceId) {
-    return deviceId.trim().toLowerCase();
-}
-
-function getDeviceLoginEmail(deviceId) {
-    const normalizedDeviceId = normalizeDeviceId(deviceId);
-
-    if (!normalizedDeviceId) {
-        throw new Error("Device ID is required");
-    }
-
-    return `${normalizedDeviceId}@smartdry.local`;
-}
-
-export async function signInDevice(
-    deviceId,
-    password,
-) {
-    return signInWithEmailAndPassword(
-        firebaseAuth,
-        getDeviceLoginEmail(deviceId),
-        password,
-    );
-}
-
-export async function signOutDevice() {
-    await signOut(firebaseAuth);
-}
+export const auth = firebaseApp ? getAuth(firebaseApp) : null;
+export const database = firebaseApp ? getDatabase(firebaseApp) : null;
