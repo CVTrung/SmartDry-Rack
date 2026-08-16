@@ -6,7 +6,6 @@ import {
 
 import {
   auth,
-  database,
   isFirebaseConfigured,
 } from '../firebase.js';
 
@@ -33,7 +32,7 @@ export function normalizeDeviceId(value) {
 }
 
 function assertFirebaseConfigured() {
-  if (!isFirebaseConfigured || !auth || !database) {
+  if (!isFirebaseConfigured || !auth) {
     throw new Error('Firebase chưa được cấu hình. Vui lòng kiểm tra file website/.env.');
   }
 }
@@ -130,7 +129,7 @@ export async function loginWithDeviceId(rawDeviceId, password) {
 }
 
 export function observeAuthState(callback) {
-  if (!isFirebaseConfigured || !auth || !database) {
+  if (!isFirebaseConfigured || !auth) {
     callback(null);
     return () => { };
   }

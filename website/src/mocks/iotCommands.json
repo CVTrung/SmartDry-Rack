@@ -1,0 +1,33 @@
+{
+  "Device_Status": {
+    "<device_id>": {
+      "last_seen": 1786512200000,
+      "simulator": "wokwi",
+      "firmware_version": "0.1.0"
+    }
+  },
+  "initial_rack_state": {
+    "rack_state": "retracted",
+    "reason": "Trạng thái khởi tạo từ mock"
+  },
+  "commands": {
+    "extend": {
+      "label": "Phơi đồ",
+      "pending_label": "Đang gửi lệnh phơi đồ…",
+      "completed_label": "Đã phơi đồ thành công.",
+      "rack_state": "extended"
+    },
+    "retract": {
+      "label": "Thu đồ",
+      "pending_label": "Đang gửi lệnh thu đồ…",
+      "completed_label": "Đã thu đồ thành công.",
+      "rack_state": "retracted"
+    }
+  },
+  "simulation": {
+    "initial_online": true,
+    "ack_delay_min_ms": 500,
+    "ack_delay_max_ms": 1000,
+    "command_timeout_ms": 12000
+  }
+}
