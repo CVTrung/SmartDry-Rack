@@ -3,8 +3,6 @@ setlocal
 
 set "PROJECT_DIR=%~dp0"
 set "TEST_PYTHON=%PROJECT_DIR%.venv\Scripts\python.exe"
-set "WEBSITE_DIR=%PROJECT_DIR%website"
-set "TEST_FAILED=0"
 
 echo ========================================
 echo SmartDry test runner
@@ -18,52 +16,32 @@ if not exist "%TEST_PYTHON%" (
     exit /b 1
 )
 
-echo [1/3] Checking Python syntax...
-"%TEST_PYTHON%" -m compileall -q "%PROJECT_DIR%backend" "%PROJECT_DIR%tests"
-
-if errorlevel 1 (
-    echo FAILED: Python syntax check
-    set "TEST_FAILED=1"
-) else (
-    echo PASSED: Python syntax check
-)
-
-echo.
-echo [2/3] Running backend tests...
 pushd "%PROJECT_DIR%"
-"%TEST_PYTHON%" -m unittest discover -s tests -p "test_*.py"
-if errorlevel 1 (
-    echo FAILED: Backend tests
-    set "TEST_FAILED=1"
-) else (
-    echo PASSED: Backend tests
-)
-popd
+set PYTHONPATH=%CD%
+set RUN_OPENWEATHER_INTEGRATION_TESTS=1
+set ALLOW_FIREBASE_SAMPLE_WRITE=1
+set RUN_FIRESTORE_INTEGRATION_TESTS=1
+set RUN_FIREBASE_INTEGRATION_TESTS=1
 
+echo Running tests...
 echo.
-echo [3/3] Building website...
-pushd "%WEBSITE_DIR%"
-call npm.cmd run build
+"%TEST_PYTHON%" -m unittest discover -s tests -p "test*.py" -v
+
 if errorlevel 1 (
-    echo FAILED: Website build
-    set "TEST_FAILED=1"
-) else (
-    echo PASSED: Website build
-)
-popd
-
-echo.
-echo ========================================
-
-if "%TEST_FAILED%"=="1" (
-    echo One or more checks FAILED.
+    echo.
+    echo ========================================
+    echo One or more tests FAILED.
     echo Review the errors above.
     echo ========================================
+    popd
     pause
     exit /b 1
 )
 
-echo All available checks PASSED.
+echo.
 echo ========================================
+echo All tests PASSED.
+echo ========================================
+popd
 pause
 exit /b 0

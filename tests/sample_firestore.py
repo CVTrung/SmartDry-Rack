@@ -59,6 +59,11 @@ def push_sample_data() -> None:
     service.create_account(
         device_id=device_id,
         display_name=account["display_name"],
+        location_id=account["location_id"],
+        gmail=account["gmail"],
+        gmail_authorized=(
+            account["gmail_authorized"]
+        ),
         enabled=account["enabled"],
     )
 

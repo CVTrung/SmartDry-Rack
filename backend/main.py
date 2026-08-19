@@ -2,6 +2,12 @@ from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from backend.notifications import (
+    create_weather_notification_runner,
+)
 
 from backend.openweather import (
     OpenWeatherError,
@@ -10,9 +16,32 @@ from backend.openweather import (
 
 from backend.auth_dependency import get_current_account
 
-app = FastAPI()
+weather_service = (
+    OpenWeatherService.from_config()
+)
 
-weather_service = OpenWeatherService.from_env()
+
+@asynccontextmanager
+async def lifespan(
+    app: FastAPI,
+) -> AsyncIterator[None]:
+    notification_runner = (
+        create_weather_notification_runner()
+    )
+
+    app.state.weather_notification_runner = (
+        notification_runner
+    )
+
+    await notification_runner.start()
+
+    try:
+        yield
+    finally:
+        await notification_runner.stop()
+
+
+app = FastAPI(lifespan=lifespan)
 
 # ================================
 # AUTH
@@ -34,7 +63,10 @@ def get_authenticated_account(
 @app.get("/api/weather/current")
 def get_current_weather(current_account: Annotated[dict, Depends(get_current_account)]):
     try:
-        return weather_service.get_current_weather()
+        weather = (
+            weather_service.get_current_weather()
+        )
+        return weather.to_dict()
     except OpenWeatherError as error:
         raise HTTPException(
             status_code=502,
@@ -45,8 +77,15 @@ def get_current_weather(current_account: Annotated[dict, Depends(get_current_acc
 @app.get("/api/weather/forecast")
 def get_forecast(current_account: Annotated[dict, Depends(get_current_account)], hours: int = 24):
     try:
+        forecasts = weather_service.get_forecast(
+            hours=hours
+        )
+
         return {
-            "items": weather_service.get_forecast(hours=hours)
+            "items": [
+                forecast.to_dict()
+                for forecast in forecasts
+            ]
         }
     except ValueError as error:
         raise HTTPException(

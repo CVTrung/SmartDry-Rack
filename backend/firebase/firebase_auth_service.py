@@ -71,6 +71,9 @@ class FirebaseAuthService:
         device_id: str,
         password: str,
         display_name: str,
+        location_id: str,
+        gmail: str,
+        gmail_authorized: bool = False,
         enabled: bool = True,
     ) -> dict[str, Any]:
         device_id = self._validate_device_id(device_id)
@@ -91,6 +94,9 @@ class FirebaseAuthService:
             account = self.firestore.create_account(
                 device_id=device_id,
                 display_name=display_name,
+                location_id=location_id,
+                gmail=gmail,
+                gmail_authorized=gmail_authorized,
                 enabled=enabled,
             )
         except Exception:
@@ -183,6 +189,23 @@ class FirebaseAuthService:
             )
             raise
 
+    def delete_device_account(
+        self,
+        device_id: str,
+    ) -> None:
+        device_id = self._validate_device_id(device_id)
+
+        try:
+            auth.delete_user(
+                device_id,
+                app=self.app,
+            )
+        except auth.UserNotFoundError:
+            # A previous partial deletion may already have removed Auth.
+            pass
+
+        self.firestore.delete_account(device_id)
+
     def create_firmware_custom_token(
         self,
         device_id: str,
@@ -227,5 +250,9 @@ class FirebaseAuthService:
         return {
             "device_id": device_id,
             "display_name": account.get("display_name", device_id),
+            "gmail": account.get("gmail"),
+            "gmail_authorized": (
+                account.get("gmail_authorized") is True
+            ),
             "enabled": True,
         }

@@ -33,10 +33,16 @@ class TestFirestoreAPI(unittest.TestCase):
         cls.command_id = (
             f"test_command_{unique_suffix}"
         )
+        cls.location_id = (
+            f"test_location_{unique_suffix}"
+        )
 
         cls.service.create_account(
             device_id=cls.device_id,
             display_name="Firestore Test Rack",
+            location_id=cls.location_id,
+            gmail="firestore.test@gmail.com",
+            gmail_authorized=True,
             enabled=True,
         )
 

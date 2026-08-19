@@ -1,19 +1,28 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
+from google.api_core.exceptions import AlreadyExists
 
 from backend.firebase import get_firebase_app
-
+from backend.models import (
+    AlertType,
+    EmailStatus,
+    WeatherAlert,
+)
 
 class FirestoreService:
     ACCOUNTS = "accounts"
     DEVICES = "devices"
+    LOCATIONS = "locations"
 
     DEVICE_HISTORY = "device_history"
     COMMAND_HISTORY = "command_history"
     FORECAST_HISTORY = "forecast_history"
+    NOTIFICATIONS = "notifications"
+    SYSTEM_LEASES = "system_leases"
+    WEATHER_BROADCAST_LEASE = "weather_broadcast"
 
     DEVICE_RECORD_TYPES = {
         "sensor",
@@ -102,6 +111,33 @@ class FirestoreService:
         return value
 
     @staticmethod
+    def _validate_gmail(gmail: str) -> str:
+        gmail = gmail.strip().lower()
+
+        if (
+            gmail.count("@") != 1
+            or any(character.isspace() for character in gmail)
+        ):
+            raise ValueError(
+                "gmail must be a valid Gmail address"
+            )
+
+        local_part, domain = gmail.rsplit("@", 1)
+
+        if (
+            not local_part
+            or domain not in {
+                "gmail.com",
+                "googlemail.com",
+            }
+        ):
+            raise ValueError(
+                "gmail must use gmail.com or googlemail.com"
+            )
+
+        return gmail
+
+    @staticmethod
     def _validate_limit(limit: int) -> int:
         if not 1 <= limit <= 100:
             raise ValueError(
@@ -169,6 +205,226 @@ class FirestoreService:
             .document(device_id)
         )
 
+    def _notification_reference(
+        self,
+        device_id: str,
+        notification_id: str,
+    ):
+        device_id = self._validate_device_id(
+            device_id
+        )
+
+        notification_id = (
+            self._validate_required_text(
+                notification_id,
+                "notification_id",
+                maximum_length=128,
+            )
+        )
+
+        if "/" in notification_id:
+            raise ValueError(
+                "notification_id must not contain /"
+            )
+
+        return (
+            self._device_reference(device_id)
+            .collection(self.NOTIFICATIONS)
+            .document(notification_id)
+        )
+
+    @staticmethod
+    def _validate_location_id(location_id: str) -> str:
+        location_id = location_id.strip().lower()
+
+        if not location_id:
+            raise ValueError(
+                "location_id must not be empty"
+            )
+
+        if "/" in location_id:
+            raise ValueError(
+                "location_id must not contain /"
+            )
+
+        return location_id
+
+
+    def _location_reference(
+        self,
+        location_id: str,
+    ):
+        location_id = self._validate_location_id(
+            location_id
+        )
+
+        return (
+            self.database
+            .collection(self.LOCATIONS)
+            .document(location_id)
+        )
+
+    def _weather_broadcast_lease_reference(self):
+        return (
+            self.database
+            .collection(self.SYSTEM_LEASES)
+            .document(self.WEATHER_BROADCAST_LEASE)
+        )
+
+    @staticmethod
+    def _validate_lease_seconds(
+        lease_seconds: int,
+    ) -> int:
+        if (
+            not isinstance(lease_seconds, int)
+            or isinstance(lease_seconds, bool)
+            or not 30 <= lease_seconds <= 3600
+        ):
+            raise ValueError(
+                "lease_seconds must be between 30 and 3600"
+            )
+
+        return lease_seconds
+
+    def try_acquire_weather_broadcast_lease(
+        self,
+        *,
+        owner_id: str,
+        lease_seconds: int,
+    ) -> bool:
+        owner_id = self._validate_required_text(
+            owner_id,
+            "owner_id",
+            maximum_length=128,
+        )
+        lease_seconds = self._validate_lease_seconds(
+            lease_seconds
+        )
+        lease_reference = (
+            self._weather_broadcast_lease_reference()
+        )
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(
+            seconds=lease_seconds
+        )
+        transaction = self.database.transaction()
+
+        @firestore.transactional
+        def acquire(transaction):
+            snapshot = lease_reference.get(
+                transaction=transaction
+            )
+            lease = (
+                snapshot.to_dict()
+                if snapshot.exists
+                else None
+            ) or {}
+            current_owner = lease.get("owner_id")
+            current_expiry = lease.get("expires_at")
+            available = (
+                not snapshot.exists
+                or current_owner == owner_id
+                or not isinstance(current_expiry, datetime)
+                or current_expiry <= now
+            )
+
+            if not available:
+                return False
+
+            transaction.set(
+                lease_reference,
+                {
+                    "owner_id": owner_id,
+                    "expires_at": expires_at,
+                    "updated_at": (
+                        firestore.SERVER_TIMESTAMP
+                    ),
+                },
+            )
+            return True
+
+        return bool(acquire(transaction))
+
+    def renew_weather_broadcast_lease(
+        self,
+        *,
+        owner_id: str,
+        lease_seconds: int,
+    ) -> bool:
+        owner_id = self._validate_required_text(
+            owner_id,
+            "owner_id",
+            maximum_length=128,
+        )
+        lease_seconds = self._validate_lease_seconds(
+            lease_seconds
+        )
+        lease_reference = (
+            self._weather_broadcast_lease_reference()
+        )
+        expires_at = datetime.now(
+            timezone.utc
+        ) + timedelta(seconds=lease_seconds)
+        transaction = self.database.transaction()
+
+        @firestore.transactional
+        def renew(transaction):
+            snapshot = lease_reference.get(
+                transaction=transaction
+            )
+            lease = (
+                snapshot.to_dict()
+                if snapshot.exists
+                else None
+            ) or {}
+
+            if lease.get("owner_id") != owner_id:
+                return False
+
+            transaction.update(
+                lease_reference,
+                {
+                    "expires_at": expires_at,
+                    "updated_at": (
+                        firestore.SERVER_TIMESTAMP
+                    ),
+                },
+            )
+            return True
+
+        return bool(renew(transaction))
+
+    def release_weather_broadcast_lease(
+        self,
+        *,
+        owner_id: str,
+    ) -> None:
+        owner_id = self._validate_required_text(
+            owner_id,
+            "owner_id",
+            maximum_length=128,
+        )
+        lease_reference = (
+            self._weather_broadcast_lease_reference()
+        )
+        transaction = self.database.transaction()
+
+        @firestore.transactional
+        def release(transaction):
+            snapshot = lease_reference.get(
+                transaction=transaction
+            )
+            lease = (
+                snapshot.to_dict()
+                if snapshot.exists
+                else None
+            ) or {}
+
+            if lease.get("owner_id") == owner_id:
+                transaction.delete(lease_reference)
+
+        release(transaction)
+
     # =========================================================
     # Accounts
     #
@@ -183,6 +439,9 @@ class FirestoreService:
         self,
         device_id: str,
         display_name: str,
+        location_id: str,
+        gmail: str,
+        gmail_authorized: bool = False,
         enabled: bool = True,
     ) -> dict[str, Any]:
         device_id = self._validate_device_id(device_id)
@@ -192,6 +451,15 @@ class FirestoreService:
             "display_name",
             maximum_length=100,
         )
+        location_id = self._validate_location_id(
+            location_id
+        )
+        gmail = self._validate_gmail(gmail)
+
+        if not isinstance(gmail_authorized, bool):
+            raise TypeError(
+                "gmail_authorized must be a boolean"
+            )
 
         if not isinstance(enabled, bool):
             raise TypeError(
@@ -219,6 +487,8 @@ class FirestoreService:
         account_payload: dict[str, Any] = {
             "device_id": device_id,
             "display_name": display_name,
+            "gmail": gmail,
+            "gmail_authorized": gmail_authorized,
             "enabled": enabled,
             "created_at": firestore.SERVER_TIMESTAMP,
             "updated_at": firestore.SERVER_TIMESTAMP,
@@ -226,9 +496,7 @@ class FirestoreService:
         }
 
         device_payload: dict[str, Any] = {
-            "device_id": device_id,
-            "display_name": display_name,
-            "enabled": enabled,
+            "location_id": location_id,
             "created_at": firestore.SERVER_TIMESTAMP,
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
@@ -271,11 +539,43 @@ class FirestoreService:
 
         return self._snapshot_to_dict(snapshot)
 
+
+    def get_enabled_accounts(
+        self,
+    ) -> list[dict[str, Any]]:
+        snapshots = (
+            self.database
+            .collection(self.ACCOUNTS)
+            .where(
+                filter=FieldFilter(
+                    "enabled",
+                    "==",
+                    True,
+                )
+            )
+            .stream()
+        )
+
+        return self._snapshots_to_list(snapshots)
+
+
+    def get_device(
+        self,
+        device_id: str,
+    ) -> dict[str, Any] | None:
+        snapshot = self._device_reference(
+            device_id
+        ).get()
+
+        return self._snapshot_to_dict(snapshot)
+
     def update_account(
         self,
         device_id: str,
         *,
         display_name: str | None = None,
+        gmail: str | None = None,
+        gmail_authorized: bool | None = None,
         enabled: bool | None = None,
     ) -> dict[str, Any]:
         device_id = self._validate_device_id(device_id)
@@ -291,6 +591,25 @@ class FirestoreService:
                     "display_name",
                     maximum_length=100,
                 )
+            )
+
+        if gmail is not None:
+            updates["gmail"] = self._validate_gmail(
+                gmail
+            )
+
+            # Changing the destination revokes the previous
+            # authorization unless the backend explicitly grants it.
+            updates["gmail_authorized"] = False
+
+        if gmail_authorized is not None:
+            if not isinstance(gmail_authorized, bool):
+                raise TypeError(
+                    "gmail_authorized must be a boolean"
+                )
+
+            updates["gmail_authorized"] = (
+                gmail_authorized
             )
 
         if enabled is not None:
@@ -349,6 +668,28 @@ class FirestoreService:
             account
             and account.get("enabled") is True
         )
+
+
+    def delete_account(
+        self,
+        device_id: str,
+    ) -> None:
+        device_id = self._validate_device_id(device_id)
+        device_reference = self._device_reference(
+            device_id
+        )
+        account_reference = (
+            self.database
+            .collection(self.ACCOUNTS)
+            .document(device_id)
+        )
+
+        # Deleting a Firestore document alone does not delete its
+        # history and notification subcollections.
+        self.database.recursive_delete(
+            device_reference
+        )
+        account_reference.delete()
 
     # =========================================================
     # Device history
@@ -903,6 +1244,498 @@ class FirestoreService:
                 direction=firestore.Query.DESCENDING,
             )
             .limit(limit)
+            .stream()
+        )
+
+        return self._snapshots_to_list(snapshots)
+
+    # =========================================================
+    # Weather notifications
+    #
+    # Firestore path:
+    # devices/{device_id}/notifications/{notification_id}
+    # =========================================================
+
+    def create_notification(
+        self,
+        alert: WeatherAlert,
+        *,
+        email_status: EmailStatus,
+    ) -> bool:
+        if not isinstance(alert, WeatherAlert):
+            raise TypeError(
+                "alert must be a WeatherAlert"
+            )
+
+        if not isinstance(email_status, EmailStatus):
+            raise TypeError(
+                "email_status must be an EmailStatus"
+            )
+
+        notification_reference = (
+            self._notification_reference(
+                alert.device_id,
+                alert.alert_id,
+            )
+        )
+
+        payload: dict[str, Any] = {
+            "device_id": alert.device_id,
+            "location_id": alert.location_id,
+            "scan_id": alert.scan_id,
+            "notification_type": (
+                alert.alert_type.value
+            ),
+            "alert_key": alert.alert_key,
+            "reason": alert.reason,
+            "weather": alert.weather_snapshot(),
+            "email": {
+                "status": email_status.value,
+                "attempt_count": 0,
+                "gmail_message_id": None,
+                "last_error": None,
+                "last_attempt_at": None,
+                "sent_at": None,
+            },
+            "created_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+
+        try:
+            # create() fails if this deterministic notification ID already exists.
+            notification_reference.create(payload)
+        except AlreadyExists:
+            return False
+
+        return True
+
+
+    def get_notification(
+        self,
+        device_id: str,
+        notification_id: str,
+    ) -> dict[str, Any] | None:
+        snapshot = (
+            self._notification_reference(
+                device_id,
+                notification_id,
+            )
+            .get()
+        )
+
+        return self._snapshot_to_dict(snapshot)
+
+
+    def mark_email_sent(
+        self,
+        *,
+        device_id: str,
+        notification_id: str,
+        gmail_message_id: str,
+    ) -> None:
+        gmail_message_id = (
+            self._validate_required_text(
+                gmail_message_id,
+                "gmail_message_id",
+                maximum_length=200,
+            )
+        )
+
+        notification_reference = (
+            self._notification_reference(
+                device_id,
+                notification_id,
+            )
+        )
+
+        notification_reference.update({
+            "email.status": EmailStatus.SENT.value,
+            "email.attempt_count": (
+                firestore.Increment(1)
+            ),
+            "email.gmail_message_id": (
+                gmail_message_id
+            ),
+            "email.last_error": None,
+            "email.last_attempt_at": (
+                firestore.SERVER_TIMESTAMP
+            ),
+            "email.sent_at": (
+                firestore.SERVER_TIMESTAMP
+            ),
+            "updated_at": (
+                firestore.SERVER_TIMESTAMP
+            ),
+        })
+
+
+    def mark_email_failed(
+        self,
+        *,
+        device_id: str,
+        notification_id: str,
+        error_message: str,
+    ) -> None:
+        error_message = (
+            self._validate_required_text(
+                error_message,
+                "error_message",
+                maximum_length=500,
+            )
+        )
+
+        notification_reference = (
+            self._notification_reference(
+                device_id,
+                notification_id,
+            )
+        )
+
+        notification_reference.update({
+            "email.status": EmailStatus.FAILED.value,
+            "email.attempt_count": (
+                firestore.Increment(1)
+            ),
+            "email.gmail_message_id": None,
+            "email.last_error": error_message,
+            "email.last_attempt_at": (
+                firestore.SERVER_TIMESTAMP
+            ),
+            "updated_at": (
+                firestore.SERVER_TIMESTAMP
+            ),
+        })
+
+
+    def get_device_notifications(
+        self,
+        device_id: str,
+        *,
+        notification_type: AlertType | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        device_id = self._validate_device_id(
+            device_id
+        )
+        limit = self._validate_limit(limit)
+
+        query = (
+            self._device_reference(device_id)
+            .collection(self.NOTIFICATIONS)
+        )
+
+        if notification_type is not None:
+            if not isinstance(
+                notification_type,
+                AlertType,
+            ):
+                raise TypeError(
+                    "notification_type must be an AlertType"
+                )
+
+            query = query.where(
+                filter=FieldFilter(
+                    "notification_type",
+                    "==",
+                    notification_type.value,
+                )
+            )
+
+        snapshots = (
+            query
+            .order_by(
+                "created_at",
+                direction=firestore.Query.DESCENDING,
+            )
+            .limit(limit)
+            .stream()
+        )
+
+        return self._snapshots_to_list(snapshots)
+
+
+    def get_latest_forecast_notification(
+        self,
+        device_id: str,
+    ) -> dict[str, Any] | None:
+        notifications = (
+            self.get_device_notifications(
+                device_id,
+                notification_type=(
+                    AlertType.NEAR_FORECAST_RAIN
+                ),
+                limit=1,
+            )
+        )
+
+        if not notifications:
+            return None
+
+        return notifications[0]
+
+
+    def get_latest_current_notification(
+        self,
+        device_id: str,
+    ) -> dict[str, Any] | None:
+        notifications = self.get_device_notifications(
+            device_id,
+            notification_type=AlertType.CURRENT_RAIN,
+            limit=1,
+        )
+
+        if not notifications:
+            return None
+
+        return notifications[0]
+
+    # =========================================================
+    # Locations and weather
+    #
+    # Firestore paths:
+    # locations/{location_id}
+    # locations/{location_id}/current/{scan_id}
+    # locations/{location_id}/forecast/{scan_id}
+    # =========================================================
+
+    def set_location(
+        self,
+        *,
+        location_id: str,
+        name: str,
+        latitude: float,
+        longitude: float,
+        timezone: str,
+    ) -> None:
+        location_id = self._validate_location_id(
+            location_id
+        )
+        name = self._validate_required_text(
+            name,
+            "name",
+            maximum_length=100,
+        )
+        timezone = self._validate_required_text(
+            timezone,
+            "timezone",
+            maximum_length=100,
+        )
+
+        if not isinstance(latitude, (int, float)):
+            raise TypeError(
+                "latitude must be a number"
+            )
+
+        if not isinstance(longitude, (int, float)):
+            raise TypeError(
+                "longitude must be a number"
+            )
+
+        if not -90 <= latitude <= 90:
+            raise ValueError(
+                "latitude must be between -90 and 90"
+            )
+
+        if not -180 <= longitude <= 180:
+            raise ValueError(
+                "longitude must be between -180 and 180"
+            )
+
+        self._location_reference(location_id).set(
+            {
+                "location_id": location_id,
+                "name": name,
+                "latitude": float(latitude),
+                "longitude": float(longitude),
+                "timezone": timezone,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+
+
+    def get_location(
+        self,
+        location_id: str,
+    ) -> dict[str, Any] | None:
+        snapshot = (
+            self._location_reference(location_id)
+            .get()
+        )
+
+        return self._snapshot_to_dict(snapshot)
+
+
+    def set_current_weather(
+        self,
+        *,
+        location_id: str,
+        weather: Mapping[str, Any],
+        is_raining: bool,
+        rain_started_at: datetime | None,
+    ) -> str:
+        if not isinstance(weather, Mapping):
+            raise TypeError(
+                "weather must be a mapping"
+            )
+
+        if not isinstance(is_raining, bool):
+            raise TypeError(
+                "is_raining must be a boolean"
+            )
+
+        rain_started_at = self._validate_datetime(
+            rain_started_at,
+            "rain_started_at",
+        )
+
+        if is_raining and rain_started_at is None:
+            raise ValueError(
+                "rain_started_at is required while raining"
+            )
+
+        if not is_raining:
+            rain_started_at = None
+
+        current_reference = (
+            self._location_reference(location_id)
+            .collection("current")
+            .document()
+        )
+        scan_id = current_reference.id
+
+        if not scan_id:
+            raise RuntimeError(
+                "Firestore did not create a current scan ID"
+            )
+
+        current_reference.create({
+            "scan_id": scan_id,
+            "scan_type": "current",
+            **dict(weather),
+            "is_raining": is_raining,
+            "rain_started_at": rain_started_at,
+            "scanned_at": firestore.SERVER_TIMESTAMP,
+        })
+
+        return scan_id
+
+
+    def get_current_weather(
+        self,
+        location_id: str,
+    ) -> dict[str, Any] | None:
+        snapshots = list(
+            self._location_reference(location_id)
+            .collection("current")
+            .order_by(
+                "scanned_at",
+                direction=firestore.Query.DESCENDING,
+            )
+            .limit(1)
+            .stream()
+        )
+
+        if snapshots:
+            return self._snapshot_to_dict(
+                snapshots[0]
+            )
+
+        legacy_snapshot = (
+            self._location_reference(location_id)
+            .collection("weather")
+            .document("current")
+            .get()
+        )
+
+        return self._snapshot_to_dict(legacy_snapshot)
+
+
+    def set_latest_forecast(
+        self,
+        *,
+        location_id: str,
+        forecasts: list[Mapping[str, Any]],
+    ) -> str:
+        if not isinstance(forecasts, list):
+            raise TypeError(
+                "forecasts must be a list"
+            )
+
+        normalized_forecasts: list[dict[str, Any]] = []
+
+        for forecast in forecasts:
+            if not isinstance(forecast, Mapping):
+                raise TypeError(
+                    "each forecast must be a mapping"
+                )
+
+            normalized_forecasts.append(
+                dict(forecast)
+            )
+
+        forecast_reference = (
+            self._location_reference(location_id)
+            .collection("forecast")
+            .document()
+        )
+        scan_id = forecast_reference.id
+
+        if not scan_id:
+            raise RuntimeError(
+                "Firestore did not create a forecast scan ID"
+            )
+
+        forecast_reference.create({
+            "scan_id": scan_id,
+            "scan_type": "forecast",
+            "items": normalized_forecasts,
+            "forecast_count": len(
+                normalized_forecasts
+            ),
+            "fetched_at": firestore.SERVER_TIMESTAMP,
+            "scanned_at": firestore.SERVER_TIMESTAMP,
+        })
+
+        return scan_id
+
+
+    def get_latest_forecast(
+        self,
+        location_id: str,
+    ) -> dict[str, Any] | None:
+        snapshots = list(
+            self._location_reference(location_id)
+            .collection("forecast")
+            .order_by(
+                "scanned_at",
+                direction=firestore.Query.DESCENDING,
+            )
+            .limit(1)
+            .stream()
+        )
+
+        if snapshots:
+            return self._snapshot_to_dict(
+                snapshots[0]
+            )
+
+        legacy_snapshot = (
+            self._location_reference(location_id)
+            .collection("forecasts")
+            .document("latest")
+            .get()
+        )
+
+        return self._snapshot_to_dict(legacy_snapshot)
+
+
+    def get_locations(
+        self,
+    ) -> list[dict[str, Any]]:
+        snapshots = (
+            self.database
+            .collection(self.LOCATIONS)
             .stream()
         )
 

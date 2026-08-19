@@ -1,15 +1,16 @@
-import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env")
-
+from backend.config import (
+    OpenWeatherSettings,
+    get_settings,
+)
+from backend.models import (
+    CurrentWeather,
+    ForecastItem,
+)
 
 class OpenWeatherError(RuntimeError):
     """Lỗi xảy ra khi gọi hoặc xử lý dữ liệu OpenWeather."""
@@ -41,35 +42,50 @@ class OpenWeatherService:
         self.session = requests.Session()
 
     @classmethod
-    def from_env(cls) -> "OpenWeatherService":
-        """Khởi tạo service bằng cấu hình trong code/.env."""
+    def from_settings(
+        cls,
+        settings: OpenWeatherSettings,
+    ) -> "OpenWeatherService":
+        """Create the service from validated settings."""
 
-        api_key = os.getenv("OPENWEATHER_API_KEY", "").strip()
-        latitude = os.getenv("OPENWEATHER_LAT", "").strip()
-        longitude = os.getenv("OPENWEATHER_LON", "").strip()
-
-        if not api_key:
-            raise ValueError("Thiếu OPENWEATHER_API_KEY trong .env")
-
-        if not latitude:
-            raise ValueError("Thiếu OPENWEATHER_LAT trong .env")
-
-        if not longitude:
-            raise ValueError("Thiếu OPENWEATHER_LON trong .env")
-
-        try:
-            parsed_latitude = float(latitude)
-            parsed_longitude = float(longitude)
-        except ValueError as error:
-            raise ValueError(
-                "OPENWEATHER_LAT và OPENWEATHER_LON phải là số"
-            ) from error
+        if not isinstance(
+            settings,
+            OpenWeatherSettings,
+        ):
+            raise TypeError(
+                "settings must be OpenWeatherSettings"
+            )
 
         return cls(
-            api_key=api_key,
-            latitude=parsed_latitude,
-            longitude=parsed_longitude,
+            api_key=settings.api_key,
+            latitude=settings.latitude,
+            longitude=settings.longitude,
+            timeout=settings.timeout_seconds,
         )
+
+
+    @classmethod
+    def from_config(
+        cls,
+    ) -> "OpenWeatherService":
+        """Create the service from centralized app config."""
+
+        return cls.from_settings(
+            get_settings().openweather
+        )
+
+
+    @classmethod
+    def from_env(
+        cls,
+    ) -> "OpenWeatherService":
+        """
+        Backward-compatible alias.
+
+        Prefer from_config() in new application code.
+        """
+
+        return cls.from_config()
 
     def _request(
         self,
@@ -126,7 +142,7 @@ class OpenWeatherService:
                 "Không thể đọc JSON trả về từ OpenWeather"
             ) from error
 
-    def get_current_weather(self) -> dict[str, Any]:
+    def get_current_weather(self) -> CurrentWeather:
         """Lấy và chuẩn hóa thông tin thời tiết hiện tại."""
 
         data = self._request("weather")
@@ -145,26 +161,28 @@ class OpenWeatherService:
             observed_at = datetime.fromtimestamp(
                 timestamp,
                 tz=timezone.utc,
-            ).isoformat()
+            )
 
-        return {
-            "location": data.get("name"),
-            "observed_at": observed_at,
-            "temperature_celsius": main.get("temp"),
-            "feels_like_celsius": main.get("feels_like"),
-            "humidity_percent": main.get("humidity"),
-            "pressure_hpa": main.get("pressure"),
-            "condition": weather.get("main"),
-            "description": weather.get("description"),
-            "cloud_cover_percent": clouds.get("all"),
-            "wind_speed_mps": wind.get("speed"),
-            "rain_last_1h_mm": rain.get("1h", 0),
-        }
+        return CurrentWeather(
+            location=data.get("name"),
+            observed_at=observed_at,
+            temperature_celsius=main.get("temp"),
+            feels_like_celsius=main.get(
+                "feels_like"
+            ),
+            humidity_percent=main.get("humidity"),
+            pressure_hpa=main.get("pressure"),
+            condition=weather.get("main"),
+            description=weather.get("description"),
+            cloud_cover_percent=clouds.get("all"),
+            wind_speed_mps=wind.get("speed"),
+            rain_last_1h_mm=rain.get("1h", 0),
+        )
 
     def get_forecast(
         self,
         hours: int = 24,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ForecastItem]:
         """Lấy dự báo theo từng khoảng ba giờ."""
 
         if hours <= 0 or hours > 120:
@@ -176,7 +194,7 @@ class OpenWeatherService:
         now = datetime.now(timezone.utc)
         until = now + timedelta(hours=hours)
 
-        forecasts: list[dict[str, Any]] = []
+        forecasts: list[ForecastItem] = []
 
         for interval in intervals:
             timestamp = interval.get("dt")
@@ -199,23 +217,41 @@ class OpenWeatherService:
             clouds = interval.get("clouds", {})
             pop = interval.get("pop")
 
-            forecasts.append({
-                "forecast_at": forecast_time.isoformat(),
-                "forecast_within_minutes": max(
-                    0,
-                    round((forecast_time - now).total_seconds() / 60),
-                ),
-                "temperature_celsius": main.get("temp"),
-                "humidity_percent": main.get("humidity"),
-                "condition": weather.get("main"),
-                "description": weather.get("description"),
-                "rain_probability_percent": (
-                    round(float(pop) * 100)
-                    if pop is not None
-                    else None
-                ),
-                "rain_amount_mm": rain.get("3h", 0),
-                "cloud_cover_percent": clouds.get("all"),
-            })
+            forecasts.append(
+                ForecastItem(
+                    forecast_at=forecast_time,
+                    forecast_within_minutes=max(
+                        0,
+                        round(
+                            (
+                                forecast_time - now
+                            ).total_seconds()
+                            / 60
+                        ),
+                    ),
+                    temperature_celsius=main.get(
+                        "temp"
+                    ),
+                    humidity_percent=main.get(
+                        "humidity"
+                    ),
+                    condition=weather.get("main"),
+                    description=weather.get(
+                        "description"
+                    ),
+                    rain_probability_percent=(
+                        round(float(pop) * 100)
+                        if pop is not None
+                        else None
+                    ),
+                    rain_amount_mm=rain.get(
+                        "3h",
+                        0,
+                    ),
+                    cloud_cover_percent=clouds.get(
+                        "all"
+                    ),
+                )
+            )
 
         return forecasts

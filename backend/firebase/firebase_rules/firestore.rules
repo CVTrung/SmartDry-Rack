@@ -25,9 +25,24 @@ service cloud.firestore {
         ).data.get('enabled', false) == true;
     }
 
+    function deviceExists(deviceId) {
+      return exists(
+        /databases/$(database)/documents/devices/$(deviceId)
+      );
+    }
+
     function canReadDevice(deviceId) {
       return isOwnDevice(deviceId)
         && accountIsEnabled(deviceId);
+    }
+
+    function canReadAssignedLocation(locationId) {
+      return isSignedIn()
+        && canReadDevice(request.auth.uid)
+        && deviceExists(request.auth.uid)
+        && get(
+          /databases/$(database)/documents/devices/$(request.auth.uid)
+        ).data.get('location_id', '') == locationId;
     }
 
     function hasValidQueryLimit() {
@@ -35,17 +50,99 @@ service cloud.firestore {
         && request.query.limit > 0
         && request.query.limit <= 100;
     }
-    // Account profile:
+
+    function hasValidGmail(accountData) {
+      return accountData.gmail is string
+        && accountData.gmail.matches(
+          '^[^@ ]+@(gmail[.]com|googlemail[.]com)$'
+        );
+    }
+
+    function isSafeGmailPreferenceUpdate(deviceId) {
+      return isOwnDevice(deviceId)
+        && accountIsEnabled(deviceId)
+        && hasValidGmail(request.resource.data)
+        && request.resource.data.gmail_authorized == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'gmail',
+            'gmail_authorized',
+            'updated_at'
+          ]);
+    }
+
+    // Authentication profile. This is the source of truth for
+    // display_name, enabled, Gmail delivery preference, and last_login_at.
     // accounts/{device_id}
     match /accounts/{deviceId
     } {
       allow get: if isOwnDevice(deviceId);
       allow list: if false;
 
+      // An account may replace its Gmail address, but doing so always
+      // revokes authorization. Only the Python Firebase Admin SDK can
+      // set gmail_authorized back to true after verification.
+      allow update: if isSafeGmailPreferenceUpdate(deviceId);
+
+      // Managed by the Python Firebase Admin SDK.
+      allow create, delete: if false;
+    }
+
+    // Locations shared by devices:
+    // locations/{location_id}
+    match /locations/{locationId
+    } {
+      // A device can read only its assigned location.
+      allow get: if canReadAssignedLocation(locationId);
+      allow list: if false;
+
       // Managed by the Python Firebase Admin SDK.
       allow create, update, delete: if false;
+
+      // Append-only current-weather scans:
+      // locations/{location_id}/current/{scan_id}
+      match /current/{scanId
+      } {
+        allow get: if canReadAssignedLocation(locationId);
+
+        allow list: if canReadAssignedLocation(locationId)
+          && hasValidQueryLimit();
+
+        // Managed by the Python Firebase Admin SDK.
+        allow create, update, delete: if false;
+      }
+
+      // Append-only forecast scans:
+      // locations/{location_id}/forecast/{scan_id}
+      match /forecast/{scanId
+      } {
+        allow get: if canReadAssignedLocation(locationId);
+
+        allow list: if canReadAssignedLocation(locationId)
+          && hasValidQueryLimit();
+
+        // Managed by the Python Firebase Admin SDK.
+        allow create, update, delete: if false;
+      }
+
+      // Legacy fixed documents remain read-only during migration.
+      match /weather/{weatherId
+      } {
+        allow get: if weatherId == 'current'
+          && canReadAssignedLocation(locationId);
+        allow list, create, update, delete: if false;
+      }
+
+      match /forecasts/{forecastId
+      } {
+        allow get: if forecastId == 'latest'
+          && canReadAssignedLocation(locationId);
+        allow list, create, update, delete: if false;
+      }
     }
-    // Device metadata:
+
+    // Operational device metadata only. The document contains its
+    // location_id and operational timestamps; account fields belong
+    // under accounts/{device_id}.
     // devices/{device_id}
     match /devices/{deviceId
     } {
@@ -65,6 +162,7 @@ service cloud.firestore {
 
         allow create, update, delete: if false;
       }
+
       // Website, physical-button and automatic commands.
       match /command_history/{commandId
       } {
@@ -75,7 +173,11 @@ service cloud.firestore {
 
         allow create, update, delete: if false;
       }
-      // OpenWeather forecasts associated with this device.
+
+      // Existing device forecast history.
+      //
+      // Keep temporarily for compatibility with the current
+      // FirestoreService. New forecasts are stored by location.
       match /forecast_history/{forecastId
       } {
         allow get: if canReadDevice(deviceId);
@@ -85,7 +187,22 @@ service cloud.firestore {
 
         allow create, update, delete: if false;
       }
+
+      // Current-rain and near-forecast notifications:
+      // devices/{device_id}/notifications/{notification_id}
+      match /notifications/{notificationId
+      } {
+        allow get: if canReadDevice(deviceId);
+
+        allow list: if canReadDevice(deviceId)
+          && hasValidQueryLimit();
+
+        // Notifications and Gmail delivery status are managed
+        // by the Python Firebase Admin SDK.
+        allow create, update, delete: if false;
+      }
     }
+
     // Deny all unspecified collections and subcollections.
     match /{document=**
     } {

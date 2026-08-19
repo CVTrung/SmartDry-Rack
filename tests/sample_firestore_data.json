@@ -2,6 +2,9 @@
     "account": {
         "device_id": "device_sample_001",
         "display_name": "SmartDry Sample Rack",
+        "location_id": "location_hcm",
+        "gmail": "smartdry.sample@gmail.com",
+        "gmail_authorized": true,
         "enabled": true
     },
     "device_history": [

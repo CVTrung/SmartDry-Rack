@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
+from backend.config import OpenWeatherSettings
 
 # Cho phép import backend khi chạy trực tiếp từ tests/
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -67,42 +67,42 @@ class TestOpenWeatherService(unittest.TestCase):
         mock_request.assert_called_once_with("weather")
 
         self.assertEqual(
-            result["location"],
+            result.location,
             "Ho Chi Minh City",
         )
         self.assertEqual(
-            result["temperature_celsius"],
+            result.temperature_celsius,
             30.5,
         )
         self.assertEqual(
-            result["feels_like_celsius"],
+            result.feels_like_celsius,
             34.2,
         )
         self.assertEqual(
-            result["humidity_percent"],
+            result.humidity_percent,
             75,
         )
         self.assertEqual(
-            result["condition"],
+            result.condition,
             "Rain",
         )
         self.assertEqual(
-            result["description"],
+            result.description,
             "mưa nhẹ",
         )
         self.assertEqual(
-            result["cloud_cover_percent"],
+            result.cloud_cover_percent,
             80,
         )
         self.assertEqual(
-            result["wind_speed_mps"],
+            result.wind_speed_mps,
             3.5,
         )
         self.assertEqual(
-            result["rain_last_1h_mm"],
+            result.rain_last_1h_mm,
             1.2,
         )
-        self.assertIsNotNone(result["observed_at"])
+        self.assertIsNotNone(result.observed_at)
 
     def test_get_current_weather_without_rain(self) -> None:
         """Nếu response không có rain thì lượng mưa mặc định bằng 0."""
@@ -128,8 +128,8 @@ class TestOpenWeatherService(unittest.TestCase):
         ):
             result = self.service.get_current_weather()
 
-        self.assertEqual(result["rain_last_1h_mm"], 0)
-        self.assertIsNone(result["observed_at"])
+        self.assertEqual(result.rain_last_1h_mm, 0)
+        self.assertIsNone(result.observed_at)
 
     def test_get_forecast(self) -> None:
         """Kiểm tra chuẩn hóa dữ liệu dự báo."""
@@ -178,41 +178,41 @@ class TestOpenWeatherService(unittest.TestCase):
         forecast = result[0]
 
         self.assertEqual(
-            forecast["temperature_celsius"],
+            forecast.temperature_celsius,
             29.5,
         )
         self.assertEqual(
-            forecast["humidity_percent"],
+            forecast.humidity_percent,
             82,
         )
         self.assertEqual(
-            forecast["condition"],
+            forecast.condition,
             "Rain",
         )
         self.assertEqual(
-            forecast["description"],
+            forecast.description,
             "mưa vừa",
         )
         self.assertEqual(
-            forecast["rain_probability_percent"],
+            forecast.rain_probability_percent,
             75,
         )
         self.assertEqual(
-            forecast["rain_amount_mm"],
+            forecast.rain_amount_mm,
             2.4,
         )
         self.assertEqual(
-            forecast["cloud_cover_percent"],
+            forecast.cloud_cover_percent,
             90,
         )
 
         # Có thể lệch khoảng một phút do thời gian chạy test.
         self.assertGreaterEqual(
-            forecast["forecast_within_minutes"],
+            forecast.forecast_within_minutes,
             179,
         )
         self.assertLessEqual(
-            forecast["forecast_within_minutes"],
+            forecast.forecast_within_minutes,
             180,
         )
 
@@ -245,7 +245,7 @@ class TestOpenWeatherService(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertIsNone(
-            result[0]["rain_probability_percent"]
+            result[0].rain_probability_percent
         )
 
     def test_forecast_skips_item_without_timestamp(self) -> None:
@@ -357,6 +357,94 @@ class TestOpenWeatherService(unittest.TestCase):
 
         with self.assertRaises(OpenWeatherError):
             self.service._request("weather")
+
+    def test_creates_service_from_settings(
+        self,
+    ) -> None:
+        settings = OpenWeatherSettings(
+            api_key="settings-api-key",
+            latitude=10.7769,
+            longitude=106.7009,
+            timeout_seconds=15,
+        )
+
+        service = (
+            OpenWeatherService.from_settings(
+                settings
+            )
+        )
+
+        self.assertEqual(
+            service.api_key,
+            "settings-api-key",
+        )
+        self.assertEqual(
+            service.latitude,
+            10.7769,
+        )
+        self.assertEqual(
+            service.longitude,
+            106.7009,
+        )
+        self.assertEqual(
+            service.timeout,
+            15,
+        )
+
+
+    def test_from_config_uses_central_settings(
+        self,
+    ) -> None:
+        openweather_settings = OpenWeatherSettings(
+            api_key="central-api-key",
+            latitude=10.7769,
+            longitude=106.7009,
+            timeout_seconds=20,
+        )
+
+        application_settings = MagicMock()
+        application_settings.openweather = (
+            openweather_settings
+        )
+
+        with patch(
+            (
+                "backend.openweather."
+                "openweather_service.get_settings"
+            ),
+            return_value=application_settings,
+        ) as get_settings:
+            service = (
+                OpenWeatherService.from_config()
+            )
+
+        get_settings.assert_called_once_with()
+
+        self.assertEqual(
+            service.api_key,
+            "central-api-key",
+        )
+        self.assertEqual(
+            service.latitude,
+            10.7769,
+        )
+        self.assertEqual(
+            service.longitude,
+            106.7009,
+        )
+        self.assertEqual(
+            service.timeout,
+            20,
+        )
+
+
+    def test_rejects_wrong_settings_type(
+        self,
+    ) -> None:
+        with self.assertRaises(TypeError):
+            OpenWeatherService.from_settings(
+                MagicMock()
+            )
 
 
 if __name__ == "__main__":

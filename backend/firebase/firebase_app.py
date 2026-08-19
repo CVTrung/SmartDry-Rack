@@ -1,17 +1,16 @@
-import os
 from functools import lru_cache
-from pathlib import Path
 
 import firebase_admin
-from dotenv import load_dotenv
+
 from firebase_admin import credentials
 
+from backend.config import (
+    ConfigurationError,
+    get_settings,
+)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-ENV_FILE = PROJECT_ROOT / ".env"
+
 FIREBASE_APP_NAME = "smartdry-backend"
-
-load_dotenv(ENV_FILE)
 
 
 class FirebaseInitializationError(RuntimeError):
@@ -23,55 +22,49 @@ def get_firebase_app() -> firebase_admin.App:
     """Return the shared Firebase Admin application."""
 
     try:
-        return firebase_admin.get_app(FIREBASE_APP_NAME)
+        return firebase_admin.get_app(
+            FIREBASE_APP_NAME
+        )
     except ValueError:
+        # The named Firebase app has not been created.
         pass
 
-    database_url = os.getenv(
-        "FIREBASE_DATABASE_URL",
-        "",
-    ).strip()
-
-    service_account_path = os.getenv(
-        "FIREBASE_SERVICE_ACCOUNT_KEY_PATH",
-        "",
-    ).strip()
-
-    if not database_url:
-        raise FirebaseInitializationError(
-            "FIREBASE_DATABASE_URL is missing from .env"
+    try:
+        firebase_settings = (
+            get_settings().firebase
         )
-
-    if not service_account_path:
+    except ConfigurationError as error:
         raise FirebaseInitializationError(
-            "FIREBASE_SERVICE_ACCOUNT_KEY_PATH "
-            "is missing from .env"
-        )
+            f"Invalid Firebase configuration: {error}"
+        ) from error
 
-    key_path = Path(service_account_path)
-
-    if not key_path.is_absolute():
-        key_path = PROJECT_ROOT / key_path
-
-    key_path = key_path.resolve()
+    key_path = (
+        firebase_settings
+        .service_account_key_path
+    )
 
     if not key_path.is_file():
         raise FirebaseInitializationError(
-            "Firebase service account file was not found: "
-            f"{key_path}"
+            "Firebase service account file "
+            f"was not found: {key_path}"
         )
 
     try:
-        credential = credentials.Certificate(str(key_path))
+        credential = credentials.Certificate(
+            str(key_path)
+        )
 
         return firebase_admin.initialize_app(
             credential,
             {
-                "databaseURL": database_url.rstrip("/"),
+                "databaseURL": (
+                    firebase_settings.database_url
+                ),
             },
             name=FIREBASE_APP_NAME,
         )
     except Exception as error:
         raise FirebaseInitializationError(
-            f"Could not initialize Firebase Admin: {error}"
+            "Could not initialize Firebase Admin: "
+            f"{error}"
         ) from error

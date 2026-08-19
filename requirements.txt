@@ -2,7 +2,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.0
 
-# Firebase Admin SDK (Realtime Database)
+# Firebase Admin SDK (Cloud Firestore + Realtime Database)
 firebase-admin==6.5.0
 
 # HTTP requests (OpenWeather API 4.0)
@@ -13,3 +13,12 @@ python-dotenv==1.0.1
 
 # Scheduling (periodic sensor/weather checks)
 schedule==1.2.2
+
+# Testing
+httpx==0.27.0
+tzdata==2026.1
+
+# Gmail
+google-api-python-client==2.198.0
+google-auth-httplib2==0.4.1
+google-auth-oauthlib==1.4.0

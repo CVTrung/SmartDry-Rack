@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from firebase_admin import firestore
@@ -34,6 +34,19 @@ class TestFirestoreValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             FirestoreService._validate_limit(101)
 
+    def test_validates_gmail_address(self) -> None:
+        self.assertEqual(
+            FirestoreService._validate_gmail(
+                " OWNER@GMAIL.COM "
+            ),
+            "owner@gmail.com",
+        )
+
+        with self.assertRaises(ValueError):
+            FirestoreService._validate_gmail(
+                "owner@example.com"
+            )
+
     def test_rejects_datetime_without_timezone(
         self,
     ) -> None:
@@ -42,6 +55,21 @@ class TestFirestoreValidation(unittest.TestCase):
                 datetime(2026, 8, 12, 10, 0),
                 "recorded_at",
             )
+
+    def test_validates_weather_lease_duration(
+        self,
+    ) -> None:
+        self.assertEqual(
+            FirestoreService._validate_lease_seconds(120),
+            120,
+        )
+
+        for invalid_value in (True, 29, 3601):
+            with self.subTest(value=invalid_value):
+                with self.assertRaises(ValueError):
+                    FirestoreService._validate_lease_seconds(
+                        invalid_value
+                    )
 
 
 class TestFirestoreServiceMock(unittest.TestCase):
@@ -81,6 +109,170 @@ class TestFirestoreServiceMock(unittest.TestCase):
         )
 
         self.assertIs(result, device_reference)
+
+    def test_acquires_available_weather_broadcast_lease(
+        self,
+    ) -> None:
+        lease_reference = MagicMock()
+        snapshot = MagicMock()
+        snapshot.exists = False
+        lease_reference.get.return_value = snapshot
+        transaction = MagicMock()
+        self.service.database.transaction.return_value = (
+            transaction
+        )
+
+        with (
+            patch.object(
+                self.service,
+                "_weather_broadcast_lease_reference",
+                return_value=lease_reference,
+            ),
+            patch(
+                "backend.firebase.firestore_service."
+                "firestore.transactional",
+                side_effect=lambda function: function,
+            ),
+        ):
+            acquired = (
+                self.service
+                .try_acquire_weather_broadcast_lease(
+                    owner_id="main_process_001",
+                    lease_seconds=120,
+                )
+            )
+
+        self.assertTrue(acquired)
+        transaction.set.assert_called_once()
+
+    def test_rejects_lease_owned_by_another_main_process(
+        self,
+    ) -> None:
+        lease_reference = MagicMock()
+        snapshot = MagicMock()
+        snapshot.exists = True
+        snapshot.to_dict.return_value = {
+            "owner_id": "main_process_001",
+            "expires_at": (
+                datetime.now(timezone.utc)
+                + timedelta(minutes=1)
+            ),
+        }
+        lease_reference.get.return_value = snapshot
+        transaction = MagicMock()
+        self.service.database.transaction.return_value = (
+            transaction
+        )
+
+        with (
+            patch.object(
+                self.service,
+                "_weather_broadcast_lease_reference",
+                return_value=lease_reference,
+            ),
+            patch(
+                "backend.firebase.firestore_service."
+                "firestore.transactional",
+                side_effect=lambda function: function,
+            ),
+        ):
+            acquired = (
+                self.service
+                .try_acquire_weather_broadcast_lease(
+                    owner_id="main_process_002",
+                    lease_seconds=120,
+                )
+            )
+
+        self.assertFalse(acquired)
+        transaction.set.assert_not_called()
+
+    def test_releases_only_the_owned_weather_lease(
+        self,
+    ) -> None:
+        lease_reference = MagicMock()
+        snapshot = MagicMock()
+        snapshot.exists = True
+        snapshot.to_dict.return_value = {
+            "owner_id": "main_process_001",
+        }
+        lease_reference.get.return_value = snapshot
+        transaction = MagicMock()
+        self.service.database.transaction.return_value = (
+            transaction
+        )
+
+        with (
+            patch.object(
+                self.service,
+                "_weather_broadcast_lease_reference",
+                return_value=lease_reference,
+            ),
+            patch(
+                "backend.firebase.firestore_service."
+                "firestore.transactional",
+                side_effect=lambda function: function,
+            ),
+        ):
+            self.service.release_weather_broadcast_lease(
+                owner_id="main_process_002"
+            )
+
+        transaction.delete.assert_not_called()
+
+    def test_lists_enabled_accounts(self) -> None:
+        accounts_collection = MagicMock()
+        query = MagicMock()
+        snapshot = MagicMock()
+
+        snapshot.exists = True
+        snapshot.id = "device_001"
+        snapshot.to_dict.return_value = {
+            "device_id": "device_001",
+            "enabled": True,
+        }
+        accounts_collection.where.return_value = query
+        query.stream.return_value = [snapshot]
+        self.service.database.collection.return_value = (
+            accounts_collection
+        )
+
+        result = self.service.get_enabled_accounts()
+
+        self.service.database.collection.assert_called_once_with(
+            "accounts"
+        )
+        accounts_collection.where.assert_called_once()
+        query.stream.assert_called_once_with()
+        self.assertEqual(result[0]["device_id"], "device_001")
+
+    @patch.object(
+        FirestoreService,
+        "_device_reference",
+    )
+    def test_gets_device(
+        self,
+        mock_device_reference: MagicMock,
+    ) -> None:
+        snapshot = MagicMock()
+        snapshot.exists = True
+        snapshot.id = "device_001"
+        snapshot.to_dict.return_value = {
+            "location_id": "location_hcm",
+        }
+        mock_device_reference.return_value.get.return_value = (
+            snapshot
+        )
+
+        result = self.service.get_device("DEVICE_001")
+
+        mock_device_reference.assert_called_once_with(
+            "DEVICE_001"
+        )
+        self.assertEqual(
+            result["location_id"],
+            "location_hcm",
+        )
 
     @patch.object(
         FirestoreService,
@@ -128,6 +320,9 @@ class TestFirestoreServiceMock(unittest.TestCase):
         result = self.service.create_account(
             device_id="DEVICE_001",
             display_name="Test Rack",
+            location_id="location_hcm",
+            gmail="OWNER@GMAIL.COM",
+            gmail_authorized=True,
             enabled=True,
         )
 
@@ -158,14 +353,92 @@ class TestFirestoreServiceMock(unittest.TestCase):
         )
 
         self.assertEqual(
-            second_payload["device_id"],
-            "device_001",
+            second_payload["location_id"],
+            "location_hcm",
         )
+        self.assertEqual(
+            first_payload["gmail"],
+            "owner@gmail.com",
+        )
+        self.assertTrue(
+            first_payload["gmail_authorized"]
+        )
+        self.assertNotIn("device_id", second_payload)
+        self.assertNotIn("display_name", second_payload)
+        self.assertNotIn("enabled", second_payload)
 
         self.assertIs(
             first_payload["created_at"],
             firestore.SERVER_TIMESTAMP,
         )
+
+    @patch.object(
+        FirestoreService,
+        "get_account",
+    )
+    def test_updating_gmail_can_authorize_new_address(
+        self,
+        mock_get_account: MagicMock,
+    ) -> None:
+        accounts_collection = MagicMock()
+        account_reference = MagicMock()
+        expected_account = {
+            "device_id": "device_001",
+            "gmail": "new.owner@gmail.com",
+            "gmail_authorized": True,
+        }
+        self.service.database.collection.return_value = (
+            accounts_collection
+        )
+        accounts_collection.document.return_value = (
+            account_reference
+        )
+        mock_get_account.return_value = expected_account
+
+        result = self.service.update_account(
+            "DEVICE_001",
+            gmail="NEW.OWNER@GMAIL.COM",
+            gmail_authorized=True,
+        )
+
+        updates = account_reference.update.call_args.args[0]
+        self.assertEqual(
+            updates["gmail"],
+            "new.owner@gmail.com",
+        )
+        self.assertTrue(updates["gmail_authorized"])
+        self.assertEqual(result, expected_account)
+
+    @patch.object(
+        FirestoreService,
+        "_device_reference",
+    )
+    def test_delete_account_removes_device_tree(
+        self,
+        mock_device_reference: MagicMock,
+    ) -> None:
+        device_reference = MagicMock()
+        accounts_collection = MagicMock()
+        account_reference = MagicMock()
+        mock_device_reference.return_value = (
+            device_reference
+        )
+        self.service.database.collection.return_value = (
+            accounts_collection
+        )
+        accounts_collection.document.return_value = (
+            account_reference
+        )
+
+        self.service.delete_account("DEVICE_001")
+
+        self.service.database.recursive_delete.assert_called_once_with(
+            device_reference
+        )
+        accounts_collection.document.assert_called_once_with(
+            "device_001"
+        )
+        account_reference.delete.assert_called_once_with()
 
     @patch.object(
         FirestoreService,
