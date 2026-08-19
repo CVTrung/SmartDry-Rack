@@ -15,7 +15,7 @@ class RealtimeFirebaseService:
     INPUT_CONFIG = "Input_Config"
     OUTPUT_STATE = "Output_State"
     OUTPUT_FORECAST = "Output_Forecast"
-
+    
     def __init__(self) -> None:
         self.app = get_firebase_app()
 
