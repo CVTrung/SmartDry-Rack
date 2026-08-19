@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "author": "Anonymous maker",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-breadboard-half", "id": "bb1", "top": 73.8, "left": 185.2, "attrs": {} },
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": -144, "left": -4.76, "attrs": {} },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht1",
+      "top": -268.5,
+      "left": 215.4,
+      "attrs": { "temperature": "50.9", "humidity": "52" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": -166.8,
+      "left": -121,
+      "attrs": { "color": "red" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 38,
+      "left": -156.4,
+      "rotate": 270,
+      "attrs": { "color": "green", "xray": "1" }
+    },
+    {
+      "type": "wokwi-photoresistor-sensor",
+      "id": "ldr1",
+      "top": -230.7,
+      "left": 272.9,
+      "rotate": 90,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": -91.2,
+      "left": -125.35,
+      "rotate": 90,
+      "attrs": { "value": "1000" }
+    },
+    {
+      "type": "chip-rain-sensor",
+      "id": "chip1",
+      "top": -228.3,
+      "left": 418.72,
+      "rotate": 270,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo1",
+      "top": -212.2,
+      "left": 501,
+      "rotate": 270,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [
+      "esp:34",
+      "ldr1:AO",
+      "blue",
+      [ "h-19.05", "v-76.8", "h134.4", "v57.6", "h0", "v0", "h134.4" ]
+    ],
+    [ "btn1:1.r", "esp:26", "green", [ "v0" ] ],
+    [ "r1:1", "led1:A", "red", [ "h0" ] ],
+    [ "dht1:SDA", "esp:18", "green", [ "v0" ] ],
+    [ "esp:16", "chip1:DO", "magenta", [ "h0" ] ],
+    [ "servo1:GND", "bb1:tn.25", "black", [ "v0" ] ],
+    [ "chip1:GND", "bb1:tn.23", "black", [ "v0" ] ],
+    [ "chip1:VCC", "bb1:tp.22", "red", [ "v0" ] ],
+    [ "ldr1:GND", "bb1:tn.14", "black", [ "v0" ] ],
+    [ "ldr1:VCC", "bb1:tp.15", "red", [ "v0" ] ],
+    [ "dht1:GND", "bb1:tn.5", "black", [ "v0" ] ],
+    [ "dht1:VCC", "bb1:tp.2", "red", [ "v0" ] ],
+    [ "r1:2", "esp:25", "gold", [ "h0", "v18" ] ],
+    [ "led1:C", "esp:GND.1", "black", [ "v0" ] ],
+    [ "esp:3V3", "bb1:tp.1", "red", [ "h-38.25", "v201.6", "h9.6" ] ],
+    [ "btn1:2.l", "bb1:tn.1", "black", [ "v0" ] ],
+    [ "servo1:V+", "bb1:tp.25", "red", [ "v0" ] ],
+    [ "servo1:PWM", "esp:2", "cyan", [ "v0" ] ],
+    [ "esp:GND.3", "bb1:tn.18", "black", [ "h0" ] ]
+  ],
+  "dependencies": {}
+}
