@@ -5,7 +5,6 @@
 // Copyright (C) 2022 Uri Shaked / wokwi.com
 
 #include "wokwi-api.h"
-#include <stdio.h>
 #include <stdlib.h>
 
 typedef struct {
@@ -45,7 +44,6 @@ void chip_timer_event(void *user_data) {
   float voltage = 5.0*((float)rain/1023.0);
   if (pin_read(chip->pin_vcc) && !pin_read(chip->pin_gnd))
   {
-    printf("%u %f     ", rain, voltage);
     pin_dac_write(chip->pin_ao, voltage);
     if (((voltage/5.0)*100) > threshold)
         pin_write(chip->pin_do, HIGH);
