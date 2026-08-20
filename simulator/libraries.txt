@@ -7,3 +7,4 @@ Adafruit Unified Sensor
 ESP32Servo
 ArduinoJson
 Firebase ESP32 Client
+LiquidCrystal I2C

@@ -58,17 +58,18 @@
       "left": 501,
       "rotate": 270,
       "attrs": {}
+    },
+    {
+      "type": "wokwi-lcd1602",
+      "id": "lcd1",
+      "top": 131.2,
+      "left": 332,
+      "attrs": { "pins": "i2c" }
     }
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
     [ "esp:RX", "$serialMonitor:TX", "", [] ],
-    [
-      "esp:34",
-      "ldr1:AO",
-      "blue",
-      [ "h-19.05", "v-76.8", "h134.4", "v57.6", "h0", "v0", "h134.4" ]
-    ],
     [ "btn1:1.r", "esp:26", "green", [ "v0" ] ],
     [ "r1:1", "led1:A", "red", [ "h0" ] ],
     [ "dht1:SDA", "esp:18", "green", [ "v0" ] ],
@@ -86,7 +87,14 @@
     [ "btn1:2.l", "bb1:tn.1", "black", [ "v0" ] ],
     [ "servo1:V+", "bb1:tp.25", "red", [ "v0" ] ],
     [ "servo1:PWM", "esp:2", "cyan", [ "v0" ] ],
-    [ "esp:GND.3", "bb1:tn.18", "black", [ "h0" ] ]
+    [ "esp:GND.3", "bb1:tn.18", "black", [ "h0" ] ],
+    [ "bb1:tn.10", "lcd1:GND", "black", [ "v0" ] ],
+    [ "bb1:tp.9", "lcd1:VCC", "red", [ "v0" ] ],
+    [ "esp:34", "ldr1:AO", "blue", [ "h-19.05", "v-76.8", "h144", "v48" ] ],
+    [ "esp:21", "lcd1:SDA", "yellow", [ "h182.4", "v0", "h19.2", "v249.6" ] ],
+    [ "esp:22", "lcd1:SCL", "purple", [ "h192", "v0" ] ],
+    [ "lcd1:GND", "bb1:14t.e", "", [ "$bb" ] ],
+    [ "lcd1:SCL", "bb1:14b.f", "", [ "$bb" ] ]
   ],
   "dependencies": {}
 }
