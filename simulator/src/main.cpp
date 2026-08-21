@@ -25,7 +25,7 @@
 #define SERVO_PIN              2
 
 // Các ngưỡng (Threshold)
-#define LIGHT_THRESHOLD        1000
+#define LIGHT_THRESHOLD        450
 #define HUMIDITY_MAX_THRESHOLD 80.0
 #define TEMP_MIN_THRESHOLD     22.0
 
@@ -45,7 +45,8 @@ int previousButtonState = HIGH;
 unsigned long lastButtonTime = 0;
 unsigned long debounceDelay = 10;
 bool isLongPressHandled = false;
-
+const float GAMMA = 0.7;
+const float RL10 = 50;
 unsigned long lastSendTime = 0;
 String previousRackState = ""; // Biến lưu trạng thái cũ để tránh ghi đè liên tục
 
@@ -91,9 +92,16 @@ void loop() {
   // Đọc cảm biến
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
-  int lightLevel = analogRead(LIGHT_PIN);
+  int light = analogRead(LIGHT_PIN); 
+
+  // --- CHUYỂN ĐỔI SANG LUX CHUẨN ESP32 (3.3V, ADC 4095) ---
+  float voltage = light / 4095. * 5;
+  float resistance = 2000 * voltage / (1 - voltage / 5);
+  float rawLux = pow(RL10 * 1e3 * pow(10, GAMMA) / resistance, (1 / GAMMA));
+  float lightLevel = (int)round(rawLux);
+
   bool isRaining = (digitalRead(RAIN_PIN) == HIGH);
-  bool isDark = (lightLevel >= LIGHT_THRESHOLD);
+  bool isDark = (lightLevel < LIGHT_THRESHOLD);
   bool isHighHumidity = (humidity >= HUMIDITY_MAX_THRESHOLD);
   bool isLowTemp = (temperature <= TEMP_MIN_THRESHOLD);      
 
@@ -172,12 +180,12 @@ void loop() {
     // Hiển thị LCD
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Temp: " + String(temperature, 1) + "C");
+    lcd.print("T:" + String(temperature, 1) + "C" + " H:" + String(humidity, 1) + "%");
     lcd.setCursor(0, 1);
     lcd.print(isManualMode ? "Mode: MANUAL" : "Status: AUTO");
     
     // Log Serial
-    Serial.printf("Temp: %.1fC | Hum: %.1f%% | Light: %d | Rain: %s | State: %s | Mode: %s\n",
+    Serial.printf("Temp: %.1fC | Hum: %.1f%% | Light: %.1f | Rain: %s | State: %s | Mode: %s\n",
                   temperature, humidity, lightLevel, isRaining ? "YES" : "NO",
                   isDrying ? "PHOI" : "THU", isManualMode ? "MANUAL" : "AUTO");
 
