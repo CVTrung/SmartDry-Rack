@@ -835,7 +835,7 @@ class FirestoreService:
         sensor_data: Mapping[str, Any],
         *,
         captured_at: datetime | None = None,
-    ) -> str:
+    ) -> str | None:
         """Store one canonical five-minute RTDB sensor snapshot."""
 
         device_id = self._validate_device_id(device_id)
@@ -879,14 +879,17 @@ class FirestoreService:
             .collection(self.SENSOR_HISTORY)
             .document(snapshot_id)
         )
-        snapshot_reference.set({
-            "device_id": device_id,
-            "captured_at": captured_at,
-            "bucket_start": bucket_start,
-            "stored_at": firestore.SERVER_TIMESTAMP,
-            "source": "realtime_database",
-            **sensor_values,
-        })
+        try:
+            snapshot_reference.create({
+                "device_id": device_id,
+                "captured_at": captured_at,
+                "bucket_start": bucket_start,
+                "stored_at": firestore.SERVER_TIMESTAMP,
+                "source": "realtime_database",
+                **sensor_values,
+            })
+        except AlreadyExists:
+            return None
 
         return snapshot_id
 

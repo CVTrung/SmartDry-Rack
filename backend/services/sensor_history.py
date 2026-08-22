@@ -26,8 +26,16 @@ class SensorHistoryRepository(Protocol):
         self,
         device_id: str,
         sensor_data: Mapping[str, Any],
-    ) -> str:
-        """Persist one five-minute sensor snapshot."""
+    ) -> str | None:
+        """Persist a new five-minute sensor snapshot."""
+
+    def get_sensor_history(
+        self,
+        device_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return recent sensor snapshots, newest first."""
 
 
 class SensorHistoryRunner:
@@ -73,6 +81,67 @@ class SensorHistoryRunner:
 
         return sorted(device_ids)
 
+    @staticmethod
+    def _sensor_timestamp(
+        sensor_data: Mapping[str, Any],
+    ) -> int | float | None:
+        value = sensor_data.get("timestamp")
+
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or value < 0
+        ):
+            return None
+
+        return value
+
+    def _is_new_snapshot(
+        self,
+        device_id: str,
+        sensor_data: Mapping[str, Any],
+    ) -> bool:
+        sensor_timestamp = self._sensor_timestamp(sensor_data)
+
+        if sensor_timestamp is None:
+            logger.warning(
+                "Ignoring sensor data for %s because its timestamp "
+                "is missing or invalid",
+                device_id,
+            )
+            return False
+
+        history = self.repository.get_sensor_history(
+            device_id,
+            limit=1,
+        )
+
+        if not history:
+            return True
+
+        latest_timestamp = history[0].get("sensor_timestamp")
+
+        if (
+            not isinstance(latest_timestamp, (int, float))
+            or isinstance(latest_timestamp, bool)
+        ):
+            return True
+
+        if sensor_timestamp == latest_timestamp:
+            logger.info(
+                "Ignoring unchanged sensor data for %s: "
+                "timestamp=%s",
+                device_id,
+                sensor_timestamp,
+            )
+            return False
+
+        # ESP32 timestamps are uptime seconds. A lower value can mean
+        # the device rebooted, so it is a new session rather than proof
+        # that the RTDB snapshot is stale.
+
+        return True
+
     def snapshot_enabled_devices(self) -> int:
         """Copy current RTDB sensor values into Firestore."""
 
@@ -90,10 +159,25 @@ class SensorHistoryRunner:
                     )
                     continue
 
-                self.repository.save_sensor_snapshot(
+                if not self._is_new_snapshot(
+                    device_id,
+                    sensor_data,
+                ):
+                    continue
+
+                snapshot_id = self.repository.save_sensor_snapshot(
                     device_id,
                     sensor_data,
                 )
+
+                if snapshot_id is None:
+                    logger.info(
+                        "Ignoring sensor data for %s because the "
+                        "five-minute bucket already exists",
+                        device_id,
+                    )
+                    continue
+
                 saved_count += 1
             except Exception:
                 logger.exception(

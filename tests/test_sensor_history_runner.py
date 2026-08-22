@@ -11,6 +11,10 @@ class SensorHistoryRunnerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.realtime = MagicMock()
         self.repository = MagicMock()
+        self.repository.get_sensor_history.return_value = []
+        self.repository.save_sensor_snapshot.return_value = (
+            "20260822T0305Z"
+        )
         self.runner = SensorHistoryRunner(
             realtime=self.realtime,
             repository=self.repository,
@@ -23,8 +27,14 @@ class SensorHistoryRunnerTests(unittest.IsolatedAsyncioTestCase):
             {"device_id": "device_002"},
             {"enabled": True},
         ]
-        sensor_one = {"device_id": "device_001"}
-        sensor_two = {"device_id": "device_002"}
+        sensor_one = {
+            "device_id": "device_001",
+            "timestamp": 10,
+        }
+        sensor_two = {
+            "device_id": "device_002",
+            "timestamp": 20,
+        }
         self.realtime.get_sensor_data.side_effect = [
             sensor_one,
             sensor_two,
@@ -64,7 +74,10 @@ class SensorHistoryRunnerTests(unittest.IsolatedAsyncioTestCase):
             {"device_id": "device_001"},
             {"device_id": "device_002"},
         ]
-        sensor_two = {"device_id": "device_002"}
+        sensor_two = {
+            "device_id": "device_002",
+            "timestamp": 20,
+        }
         self.realtime.get_sensor_data.side_effect = [
             RuntimeError("RTDB unavailable"),
             sensor_two,
@@ -81,6 +94,93 @@ class SensorHistoryRunnerTests(unittest.IsolatedAsyncioTestCase):
             "device_002",
             sensor_two,
         )
+
+    def test_unchanged_snapshot_is_skipped(self) -> None:
+        self.repository.get_enabled_accounts.return_value = [
+            {"device_id": "device_001"},
+        ]
+        self.repository.get_sensor_history.return_value = [
+            {"sensor_timestamp": 100},
+        ]
+
+        self.realtime.get_sensor_data.return_value = {
+            "device_id": "device_001",
+            "timestamp": 100,
+        }
+
+        saved_count = self.runner.snapshot_enabled_devices()
+
+        self.assertEqual(saved_count, 0)
+        self.repository.save_sensor_snapshot.assert_not_called()
+
+    def test_lower_uptime_after_reboot_is_saved(self) -> None:
+        self.repository.get_enabled_accounts.return_value = [
+            {"device_id": "device_001"},
+        ]
+        self.repository.get_sensor_history.return_value = [
+            {"sensor_timestamp": 100},
+        ]
+        sensor_data = {
+            "device_id": "device_001",
+            "timestamp": 1,
+        }
+        self.realtime.get_sensor_data.return_value = sensor_data
+
+        saved_count = self.runner.snapshot_enabled_devices()
+
+        self.assertEqual(saved_count, 1)
+        self.repository.save_sensor_snapshot.assert_called_once_with(
+            "device_001",
+            sensor_data,
+        )
+
+    def test_newer_snapshot_is_saved(self) -> None:
+        self.repository.get_enabled_accounts.return_value = [
+            {"device_id": "device_001"},
+        ]
+        self.repository.get_sensor_history.return_value = [
+            {"sensor_timestamp": 100},
+        ]
+        sensor_data = {
+            "device_id": "device_001",
+            "timestamp": 101,
+        }
+        self.realtime.get_sensor_data.return_value = sensor_data
+
+        saved_count = self.runner.snapshot_enabled_devices()
+
+        self.assertEqual(saved_count, 1)
+        self.repository.save_sensor_snapshot.assert_called_once_with(
+            "device_001",
+            sensor_data,
+        )
+
+    def test_existing_bucket_is_not_counted(self) -> None:
+        self.repository.get_enabled_accounts.return_value = [
+            {"device_id": "device_001"},
+        ]
+        self.repository.save_sensor_snapshot.return_value = None
+        self.realtime.get_sensor_data.return_value = {
+            "device_id": "device_001",
+            "timestamp": 101,
+        }
+
+        saved_count = self.runner.snapshot_enabled_devices()
+
+        self.assertEqual(saved_count, 0)
+
+    def test_invalid_timestamp_is_ignored(self) -> None:
+        self.repository.get_enabled_accounts.return_value = [
+            {"device_id": "device_001"},
+        ]
+        self.realtime.get_sensor_data.return_value = {
+            "device_id": "device_001",
+        }
+
+        saved_count = self.runner.snapshot_enabled_devices()
+
+        self.assertEqual(saved_count, 0)
+        self.repository.save_sensor_snapshot.assert_not_called()
 
     async def test_start_is_idempotent_and_stop_cancels_task(self) -> None:
         blocker = asyncio.Event()

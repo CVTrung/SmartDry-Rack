@@ -46,6 +46,7 @@ code/
 │   ├── authorize_gmail.py              # Gmail sender OAuth authorization
 │   ├── create_account.py               # Device account setup
 │   ├── delete_account.py               # Delete an account and device data
+│   ├── inject_fake_sensor.py            # Inject one fake RTDB sensor snapshot
 │   └── inject_fake_weather.py          # Inject fake weather into Firestore
 ├── tests/                              # Unit and integration tests
 ├── website/                # React frontend (Vite)
@@ -105,7 +106,25 @@ devices/{device_id}/sensor_history/{five_minute_bucket}
 Each document contains the sensor values, ESP32 uptime timestamp, capture time,
 five-minute bucket, storage time, and `source=realtime_database`. The bucket ID
 makes repeated scans by a restarted or duplicate backend process idempotent
-within the same five-minute window.
+within the same five-minute window. Before saving, the backend compares the
+RTDB uptime timestamp with the newest Firestore sensor record and ignores an
+unchanged timestamp. A lower changed value is accepted because ESP32 uptime
+resets after a device reboot. Firestore also creates each bucket only once, so
+an existing history document is never overwritten.
+
+To test this flow, start the backend and inject one fake RTDB snapshot:
+
+```powershell
+python scripts/inject_fake_sensor.py --device-id device_001
+```
+
+Add `--rain-detected` to simulate rain, or override values with
+`--light-lux`, `--humidity-percent`, and `--temperature-celsius`. The script
+writes only `Input_Sensor/{device_id}`. It does not write Firestore directly;
+the backend creates the `sensor_history` document during its next five-minute
+snapshot. Starting or restarting the backend runs the first snapshot
+immediately. The device ID must belong to an enabled Firestore account because
+the backend discovers sensor-history targets from enabled accounts.
 
 ### Backend responsibility boundaries
 

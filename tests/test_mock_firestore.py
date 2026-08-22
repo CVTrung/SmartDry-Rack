@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from firebase_admin import firestore
+from google.api_core.exceptions import AlreadyExists
 
 from backend.firebase.firestore_service import (
     FirestoreService,
@@ -557,12 +558,54 @@ class TestFirestoreServiceMock(unittest.TestCase):
         history_collection.document.assert_called_once_with(
             "20260822T0305Z"
         )
-        snapshot_reference.set.assert_called_once()
-        payload = snapshot_reference.set.call_args.args[0]
+        snapshot_reference.create.assert_called_once()
+        payload = snapshot_reference.create.call_args.args[0]
         self.assertEqual(payload["device_id"], "device_001")
         self.assertEqual(payload["sensor_timestamp"], 42)
         self.assertEqual(payload["bucket_start"].minute, 5)
         self.assertEqual(payload["source"], "realtime_database")
+
+    @patch.object(
+        FirestoreService,
+        "_device_reference",
+    )
+    def test_existing_sensor_bucket_is_ignored(
+        self,
+        mock_device_reference: MagicMock,
+    ) -> None:
+        snapshot_reference = MagicMock()
+        snapshot_reference.create.side_effect = AlreadyExists(
+            "already exists"
+        )
+        history_collection = MagicMock()
+        history_collection.document.return_value = (
+            snapshot_reference
+        )
+        mock_device_reference.return_value.collection.return_value = (
+            history_collection
+        )
+
+        result = self.service.save_sensor_snapshot(
+            "device_001",
+            {
+                "device_id": "device_001",
+                "timestamp": 42,
+                "light_lux": 45000,
+                "humidity_percent": 62.5,
+                "temperature_celsius": 31.2,
+                "rain_detected": False,
+            },
+            captured_at=datetime(
+                2026,
+                8,
+                22,
+                3,
+                7,
+                tzinfo=timezone.utc,
+            ),
+        )
+
+        self.assertIsNone(result)
 
     def test_sensor_snapshot_requires_rtdb_timestamp(self) -> None:
         with self.assertRaisesRegex(
