@@ -182,7 +182,7 @@ void loop() {
     lcd.setCursor(0, 0);
     lcd.print("T:" + String(temperature, 1) + "C" + " H:" + String(humidity, 1) + "%");
     lcd.setCursor(0, 1);
-    lcd.print(isManualMode ? "Mode: MANUAL" : "Status: AUTO");
+    lcd.print(isManualMode ? "Mode: MANUAL" : "Mode: AUTO");
     
     // Log Serial
     Serial.printf("Temp: %.1fC | Hum: %.1f%% | Light: %.1f | Rain: %s | State: %s | Mode: %s\n",
