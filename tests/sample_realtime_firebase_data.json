@@ -17,30 +17,12 @@
             "rain_detected": false
         }
     },
-    "Input_Config": {
-        "device_001": {
-            "device_id": "device_001",
-            "updated_at": 1786512010,
-            "mode": "auto"
-        }
-    },
-    "Output_State": {
+    "Device_State": {
         "device_001": {
             "device_id": "device_001",
             "updated_at": 1786512020,
-            "rack_state": "extended",
-            "reason": "weather_clear_and_sunny"
-        }
-    },
-    "Output_Forecast": {
-        "device_001": {
-            "notification_001": {
-                "device_id": "device_001",
-                "notified_at": 1786512030,
-                "reason": "rain_expected",
-                "rain_probability_percent": 75,
-                "forecast_within_minutes": 45
-            }
+            "mode": "auto",
+            "rack_state": "extended"
         }
     }
 }

@@ -30,9 +30,7 @@ class TestFirebaseAPI(unittest.TestCase):
         # Remove only paths belonging to this unique test device.
         test_paths = [
             f"Input_Sensor/{cls.device_id}",
-            f"Input_Config/{cls.device_id}",
-            f"Output_State/{cls.device_id}",
-            f"Output_Forecast/{cls.device_id}",
+            f"Device_State/{cls.device_id}",
         ]
 
         for path in test_paths:
@@ -61,70 +59,32 @@ class TestFirebaseAPI(unittest.TestCase):
             sensor["light_lux"],
         )
 
-        config = self.service.set_device_config(
+        state = self.service.set_rack_command(
             device_id=self.device_id,
-            config={
-                "mode": "auto",
-            },
+            command="open",
         )
 
-        saved_config = self.service.get_device_config(
+        saved_state = self.service.get_device_state(
             self.device_id
         )
 
-        self.assertEqual(saved_config, config)
-
-        state = self.service.set_output_state(
-            device_id=self.device_id,
-            rack_state="extended",
-            reason="integration_test",
-        )
-
-        saved_state = self.service.get_output_state(
-            self.device_id
-        )
-
-        self.assertEqual(saved_state, state)
-
-        notification_id = (
-            self.service.create_forecast_notification(
-                device_id=self.device_id,
-                reason="rain_expected",
-                forecast_within_minutes=45,
-                rain_probability_percent=75,
-            )
-        )
-
-        saved_notification = (
-            self.service.get_forecast_notification(
-                device_id=self.device_id,
-                notification_id=notification_id,
-            )
-        )
-
-        self.assertIsNotNone(saved_notification)
         self.assertEqual(
-            saved_notification["device_id"],
+            saved_state["rack_state"],
+            state["rack_state"],
+        )
+        self.assertEqual(
+            saved_state["mode"],
+            "manual",
+        )
+
+        config = self.service.set_device_mode(
             self.device_id,
+            "auto",
         )
-        self.assertEqual(
-            saved_notification[
-                "rain_probability_percent"
-            ],
-            75,
+        saved_config = self.service.get_device_state(
+            self.device_id
         )
-
-        notifications = (
-            self.service.get_device_forecasts(
-                device_id=self.device_id,
-                limit=10,
-            )
-        )
-
-        self.assertIn(
-            notification_id,
-            notifications,
-        )
+        self.assertEqual(saved_config["mode"], config["mode"])
 
 
 if __name__ == "__main__":

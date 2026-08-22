@@ -1,6 +1,6 @@
 import unittest
 
-from backend.device_status import DeviceHeartbeatTracker
+from backend.services.device_status import DeviceHeartbeatTracker
 
 
 class DeviceHeartbeatTrackerTests(unittest.TestCase):

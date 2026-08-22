@@ -15,7 +15,7 @@ from backend.models import (
     EmailStatus,
     NotificationResult,
 )
-from backend.notifications.weather_notification_broadcaster import (
+from backend.notifications.broadcast import (
     WeatherNotificationBroadcaster,
 )
 

@@ -520,6 +520,105 @@ class TestFirestoreServiceMock(unittest.TestCase):
         FirestoreService,
         "_device_reference",
     )
+    def test_saves_five_minute_sensor_snapshot(
+        self,
+        mock_device_reference: MagicMock,
+    ) -> None:
+        snapshot_reference = MagicMock()
+        history_collection = MagicMock()
+        history_collection.document.return_value = snapshot_reference
+        mock_device_reference.return_value.collection.return_value = (
+            history_collection
+        )
+        captured_at = datetime(
+            2026,
+            8,
+            22,
+            3,
+            7,
+            45,
+            tzinfo=timezone.utc,
+        )
+
+        snapshot_id = self.service.save_sensor_snapshot(
+            "DEVICE_001",
+            {
+                "device_id": "device_001",
+                "timestamp": 42,
+                "light_lux": 45000,
+                "humidity_percent": 62.5,
+                "temperature_celsius": 31.2,
+                "rain_detected": False,
+            },
+            captured_at=captured_at,
+        )
+
+        self.assertEqual(snapshot_id, "20260822T0305Z")
+        history_collection.document.assert_called_once_with(
+            "20260822T0305Z"
+        )
+        snapshot_reference.set.assert_called_once()
+        payload = snapshot_reference.set.call_args.args[0]
+        self.assertEqual(payload["device_id"], "device_001")
+        self.assertEqual(payload["sensor_timestamp"], 42)
+        self.assertEqual(payload["bucket_start"].minute, 5)
+        self.assertEqual(payload["source"], "realtime_database")
+
+    def test_sensor_snapshot_requires_rtdb_timestamp(self) -> None:
+        with self.assertRaisesRegex(
+            TypeError,
+            "sensor_timestamp must be numeric",
+        ):
+            self.service.save_sensor_snapshot(
+                "device_001",
+                {
+                    "device_id": "device_001",
+                    "light_lux": 45000,
+                    "humidity_percent": 62.5,
+                    "temperature_celsius": 31.2,
+                    "rain_detected": False,
+                },
+            )
+
+    @patch.object(
+        FirestoreService,
+        "_device_reference",
+    )
+    def test_gets_sensor_history(
+        self,
+        mock_device_reference: MagicMock,
+    ) -> None:
+        query = MagicMock()
+        collection = MagicMock()
+        snapshot = MagicMock()
+        snapshot.exists = True
+        snapshot.id = "20260822T0305Z"
+        snapshot.to_dict.return_value = {
+            "device_id": "device_001",
+            "sensor_timestamp": 42,
+        }
+        mock_device_reference.return_value.collection.return_value = (
+            collection
+        )
+        collection.order_by.return_value = query
+        query.limit.return_value.stream.return_value = [snapshot]
+
+        result = self.service.get_sensor_history(
+            "device_001",
+            limit=10,
+        )
+
+        collection.order_by.assert_called_once_with(
+            "captured_at",
+            direction=firestore.Query.DESCENDING,
+        )
+        query.limit.assert_called_once_with(10)
+        self.assertEqual(result[0]["document_id"], "20260822T0305Z")
+
+    @patch.object(
+        FirestoreService,
+        "_device_reference",
+    )
     def test_rejects_invalid_sensor_values(
         self,
         mock_device_reference: MagicMock,

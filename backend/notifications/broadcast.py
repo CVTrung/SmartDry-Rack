@@ -1,31 +1,158 @@
 import logging
 
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
 from backend.config import (
+    GmailSettings,
     OpenWeatherSettings,
     Settings,
     WeatherNotificationSettings,
 )
 from backend.models import (
+    EmailStatus,
     NotificationResult,
     WeatherAlert,
 )
-from backend.notifications.alert_policy import (
+from backend.notifications.email import (
+    GmailNotificationError,
+    GmailNotificationService,
+    WeatherEmailFormatter,
+)
+from backend.notifications.policy import (
     CurrentWeatherEvaluation,
     WeatherAlertPolicy,
-)
-from backend.notifications.weather_notification_service import (
-    WeatherNotificationService,
 )
 from backend.openweather import OpenWeatherService
 
 
 logger = logging.getLogger(__name__)
+
+
+class WeatherNotificationService:
+    """Persist an alert, then deliver it through Gmail."""
+
+    def __init__(
+        self,
+        *,
+        repository: Any,
+        gmail_service: GmailNotificationService,
+        email_formatter: WeatherEmailFormatter,
+        gmail_settings: GmailSettings,
+    ) -> None:
+        self.repository = repository
+        self.gmail_service = gmail_service
+        self.email_formatter = email_formatter
+        self.gmail_settings = gmail_settings
+
+    @staticmethod
+    def _safe_error_message(error: Exception) -> str:
+        message = str(error).strip()
+        if not message:
+            message = error.__class__.__name__
+        return message[:500]
+
+    def notify(
+        self,
+        alert: WeatherAlert,
+        *,
+        device_name: str | None = None,
+        location_name: str | None = None,
+        timezone_name: str = "UTC",
+        recipient_email: str | None = None,
+        email_authorized: bool = True,
+    ) -> NotificationResult:
+        if not isinstance(email_authorized, bool):
+            raise TypeError(
+                "email_authorized must be a boolean"
+            )
+
+        email_delivery_enabled = (
+            self.gmail_settings.enabled
+            and email_authorized
+        )
+        initial_email_status = (
+            EmailStatus.PENDING
+            if email_delivery_enabled
+            else EmailStatus.SKIPPED
+        )
+
+        # Firestore is the source of truth and is written first.
+        created = self.repository.create_notification(
+            alert,
+            email_status=initial_email_status,
+        )
+        if not created:
+            return NotificationResult(
+                notification_id=alert.alert_id,
+                created=False,
+                email_status=EmailStatus.SKIPPED,
+            )
+        if not email_delivery_enabled:
+            return NotificationResult(
+                notification_id=alert.alert_id,
+                created=True,
+                email_status=EmailStatus.SKIPPED,
+            )
+
+        try:
+            content = self.email_formatter.format(
+                alert,
+                device_name=device_name,
+                location_name=location_name,
+                timezone_name=timezone_name,
+            )
+            send_arguments = {
+                "subject": content.subject,
+                "body": content.body,
+            }
+            if recipient_email is not None:
+                send_arguments["recipient_email"] = (
+                    recipient_email
+                )
+            gmail_message_id = self.gmail_service.send_email(
+                **send_arguments
+            )
+        except (GmailNotificationError, ValueError) as error:
+            error_message = self._safe_error_message(error)
+            try:
+                self.repository.mark_email_failed(
+                    device_id=alert.device_id,
+                    notification_id=alert.alert_id,
+                    error_message=error_message,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not record failed Gmail delivery "
+                    "for notification %s",
+                    alert.alert_id,
+                )
+            logger.warning(
+                "Gmail notification failed for %s: %s",
+                alert.alert_id,
+                error_message,
+            )
+            return NotificationResult(
+                notification_id=alert.alert_id,
+                created=True,
+                email_status=EmailStatus.FAILED,
+                error=error_message,
+            )
+
+        self.repository.mark_email_sent(
+            device_id=alert.device_id,
+            notification_id=alert.alert_id,
+            gmail_message_id=gmail_message_id,
+        )
+        return NotificationResult(
+            notification_id=alert.alert_id,
+            created=True,
+            email_status=EmailStatus.SENT,
+            gmail_message_id=gmail_message_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -507,6 +634,121 @@ class WeatherNotificationBroadcaster:
 
         return completed
 
+    def _process_current_scan(
+        self,
+        *,
+        location_id: str,
+        weather: Mapping[str, Any],
+        targets: list[NotificationTarget],
+        previous_weather: Mapping[str, Any] | None,
+        scan_id: str | None = None,
+    ) -> list[NotificationResult]:
+        """Evaluate and broadcast one current-weather scan."""
+        evaluations = [
+            (
+                target,
+                WeatherAlertPolicy(
+                    self._target_settings(target)
+                ).evaluate_current_weather(
+                    current_weather=weather,
+                    previous_weather=previous_weather,
+                ),
+            )
+            for target in targets
+        ]
+
+        if evaluations:
+            state = evaluations[0][1]
+        else:
+            location_settings = replace(
+                self.settings.weather_notifications,
+                location_id=location_id,
+            )
+            state = WeatherAlertPolicy(
+                location_settings
+            ).evaluate_current_weather(
+                current_weather=weather,
+                previous_weather=previous_weather,
+            )
+
+        effective_scan_id = scan_id
+        if effective_scan_id is None:
+            effective_scan_id = (
+                self.repository.set_current_weather(
+                    location_id=location_id,
+                    weather=state.weather_document,
+                    is_raining=state.is_raining,
+                    rain_started_at=state.rain_started_at,
+                )
+            )
+
+        completed = self._include_missing_current_rain_alerts(
+            evaluations,
+            effective_scan_id,
+        )
+        return self._send_evaluation_alerts(completed)
+
+    def _process_forecast_scan(
+        self,
+        *,
+        forecasts: list[Mapping[str, Any]],
+        targets: list[NotificationTarget],
+        currently_raining: bool,
+        scan_id: str,
+        force_notify: bool = False,
+    ) -> list[NotificationResult]:
+        """Evaluate and broadcast one forecast scan."""
+        results: list[NotificationResult] = []
+
+        for target in targets:
+            try:
+                latest_notification = (
+                    None
+                    if force_notify
+                    else self.repository
+                    .get_latest_forecast_notification(
+                        target.device_id
+                    )
+                )
+                alert = WeatherAlertPolicy(
+                    self._target_settings(target)
+                ).select_forecast_alert(
+                    forecasts=forecasts,
+                    currently_raining=(
+                        False
+                        if force_notify
+                        else currently_raining
+                    ),
+                    last_forecast_alert_at=(
+                        self._notification_created_at(
+                            latest_notification
+                        )
+                    ),
+                )
+                if alert is None:
+                    continue
+
+                results.append(
+                    self.notification_service.notify(
+                        replace(alert, scan_id=scan_id),
+                        device_name=target.device_name,
+                        location_name=target.location_name,
+                        timezone_name=target.timezone_name,
+                        recipient_email=target.gmail,
+                        email_authorized=(
+                            target.gmail_authorized
+                        ),
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "Forecast notification failed for "
+                    "account %s",
+                    target.device_id,
+                )
+
+        return results
+
     def check_current_weather(
         self,
         **_: Any,
@@ -531,50 +773,12 @@ class WeatherNotificationBroadcaster:
                     )
                 )
 
-                evaluations = [
-                    (
-                        target,
-                        WeatherAlertPolicy(
-                            self._target_settings(target)
-                        ).evaluate_current_weather(
-                            current_weather=current_weather,
-                            previous_weather=previous_weather,
-                        ),
-                    )
-                    for target in targets
-                ]
-
-                if evaluations:
-                    state = evaluations[0][1]
-                else:
-                    location_settings = replace(
-                        self.settings.weather_notifications,
-                        location_id=location_id,
-                    )
-                    state = WeatherAlertPolicy(
-                        location_settings
-                    ).evaluate_current_weather(
-                        current_weather=current_weather,
-                        previous_weather=previous_weather,
-                    )
-
-                scan_id = self.repository.set_current_weather(
-                    location_id=location_id,
-                    weather=state.weather_document,
-                    is_raining=state.is_raining,
-                    rain_started_at=state.rain_started_at,
-                )
-
-                evaluations = (
-                    self._include_missing_current_rain_alerts(
-                        evaluations,
-                        scan_id,
-                    )
-                )
-
                 results.extend(
-                    self._send_evaluation_alerts(
-                        evaluations
+                    self._process_current_scan(
+                        location_id=location_id,
+                        weather=current_weather,
+                        targets=targets,
+                        previous_weather=previous_weather,
                     )
                 )
             except Exception:
@@ -634,51 +838,154 @@ class WeatherNotificationBroadcaster:
                 )
                 continue
 
-            for target in targets:
-                try:
-                    latest_notification = (
-                        self.repository
-                        .get_latest_forecast_notification(
-                            target.device_id
-                        )
-                    )
-                    alert = WeatherAlertPolicy(
-                        self._target_settings(target)
-                    ).select_forecast_alert(
-                        forecasts=forecasts,
-                        currently_raining=currently_raining,
-                        last_forecast_alert_at=(
-                            self._notification_created_at(
-                                latest_notification
-                            )
-                        ),
+            results.extend(
+                self._process_forecast_scan(
+                    forecasts=forecasts,
+                    targets=targets,
+                    currently_raining=currently_raining,
+                    scan_id=scan_id,
+                )
+            )
+
+        return results
+
+    @staticmethod
+    def _result_document(
+        result: NotificationResult,
+    ) -> dict[str, Any]:
+        return {
+            "notification_id": result.notification_id,
+            "created": result.created,
+            "email_status": result.email_status.value,
+            "gmail_message_id": result.gmail_message_id,
+            "error": result.error,
+        }
+
+    def check_pending_weather_scans(
+        self,
+        **_: Any,
+    ) -> list[NotificationResult]:
+        locations = self._load_locations()
+        grouped_targets = self._group_by_location(
+            self._load_targets(locations)
+        )
+        all_results: list[NotificationResult] = []
+
+        for scan in self.repository.get_pending_weather_scans():
+            location_id = self._required_text(
+                scan.get("location_id")
+            )
+            scan_id = self._required_text(
+                scan.get("scan_id")
+                or scan.get("document_id")
+            )
+            scan_type = self._required_text(scan.get("scan_type"))
+
+            if (
+                location_id is None
+                or scan_id is None
+                or scan_type not in {"current", "forecast"}
+            ):
+                logger.warning(
+                    "Skipping malformed pending weather scan"
+                )
+                continue
+
+            results: list[NotificationResult] = []
+
+            try:
+                location = locations.get(location_id)
+                targets = grouped_targets.get(location_id, [])
+
+                if location is None:
+                    raise ValueError(
+                        f"Location does not exist: {location_id}"
                     )
 
-                    if alert is None:
-                        continue
-
-                    alert = replace(
-                        alert,
-                        scan_id=scan_id,
+                if not targets:
+                    raise ValueError(
+                        "No enabled notification account is assigned "
+                        f"to {location_id}"
                     )
 
-                    results.append(
-                        self.notification_service.notify(
-                            alert,
-                            device_name=target.device_name,
-                            location_name=target.location_name,
-                            timezone_name=target.timezone_name,
-                            recipient_email=target.gmail,
-                            email_authorized=(
-                                target.gmail_authorized
+                force_notify = scan.get("force_notify") is True
+
+                if scan_type == "current":
+                    results.extend(
+                        self._process_current_scan(
+                            location_id=location_id,
+                            weather=scan,
+                            targets=targets,
+                            previous_weather=(
+                                None
+                                if force_notify
+                                else self.repository
+                                .get_current_weather(location_id)
                             ),
+                            scan_id=scan_id,
                         )
+                    )
+                else:
+                    forecasts = scan.get("items")
+
+                    if not isinstance(forecasts, list) or not all(
+                        isinstance(item, Mapping)
+                        for item in forecasts
+                    ):
+                        raise ValueError(
+                            "Forecast scan items are invalid"
+                        )
+
+                    current_weather = (
+                        self.repository.get_current_weather(location_id)
+                    )
+                    currently_raining = bool(
+                        current_weather
+                        and current_weather.get("is_raining") is True
+                    )
+
+                    results.extend(
+                        self._process_forecast_scan(
+                            forecasts=forecasts,
+                            targets=targets,
+                            currently_raining=currently_raining,
+                            scan_id=scan_id,
+                            force_notify=force_notify,
+                        )
+                    )
+
+                self.repository.finish_weather_scan(
+                    location_id=location_id,
+                    scan_type=scan_type,
+                    scan_id=scan_id,
+                    results=[
+                        self._result_document(result)
+                        for result in results
+                    ],
+                )
+                all_results.extend(results)
+            except Exception as error:
+                logger.exception(
+                    "Pending weather scan processing failed for %s/%s/%s",
+                    location_id,
+                    scan_type,
+                    scan_id,
+                )
+
+                try:
+                    self.repository.finish_weather_scan(
+                        location_id=location_id,
+                        scan_type=scan_type,
+                        scan_id=scan_id,
+                        results=[
+                            self._result_document(result)
+                            for result in results
+                        ],
+                        error=str(error),
                     )
                 except Exception:
                     logger.exception(
-                        "Forecast notification failed for "
-                        "account %s",
-                        target.device_id,
+                        "Could not mark pending weather scan failed"
                     )
 
-        return results
+        return all_results

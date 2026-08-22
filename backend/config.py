@@ -10,6 +10,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = PROJECT_ROOT / ".env"
 load_dotenv(ENV_FILE)
 
+SENSOR_HISTORY_INTERVAL_MINUTES = 5
+SENSOR_HISTORY_INTERVAL_SECONDS = (
+    SENSOR_HISTORY_INTERVAL_MINUTES * 60
+)
+
 
 class ConfigurationError(RuntimeError):
     """Raised when backend configuration is invalid."""

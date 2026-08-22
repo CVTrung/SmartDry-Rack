@@ -10,14 +10,14 @@ from backend.config import (
     Settings,
     WeatherNotificationSettings,
 )
-from backend.notifications.weather_notification_factory import (
+from backend.notifications.runner import (
     create_weather_notification_runner,
 )
 
 
 FACTORY_MODULE = (
     "backend.notifications."
-    "weather_notification_factory"
+    "runner"
 )
 
 

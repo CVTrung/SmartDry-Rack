@@ -6,7 +6,7 @@ from backend.config import (
     WeatherNotificationSettings,
 )
 from backend.models import AlertType
-from backend.notifications.alert_policy import (
+from backend.notifications.policy import (
     WeatherAlertPolicy,
 )
 

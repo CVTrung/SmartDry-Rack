@@ -45,8 +45,7 @@ def push_sample_data() -> None:
     normal_nodes = [
         "Device_Accounts",
         "Input_Sensor",
-        "Input_Config",
-        "Output_State",
+        "Device_State",
     ]
 
     for node_name in normal_nodes:
@@ -54,30 +53,6 @@ def push_sample_data() -> None:
 
         for device_id, payload in records.items():
             path = f"{node_name}/{device_id}"
-
-            db.reference(
-                path,
-                app=service.app,
-            ).set(payload)
-
-            print(f"Wrote: {path}")
-
-    forecast_devices = sample.get(
-        "Output_Forecast",
-        {},
-    )
-
-    for device_id, notifications in (
-        forecast_devices.items()
-    ):
-        for notification_id, payload in (
-            notifications.items()
-        ):
-            path = (
-                f"Output_Forecast/"
-                f"{device_id}/"
-                f"{notification_id}"
-            )
 
             db.reference(
                 path,

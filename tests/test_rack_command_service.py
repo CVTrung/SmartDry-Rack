@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-from backend.rack_command_service import (
+from backend.services.rack_commands import (
     CommandConflictError,
     RackCommandService,
 )

@@ -11,7 +11,7 @@ from unittest.mock import (
 from backend.config import (
     WeatherNotificationSettings,
 )
-from backend.notifications.weather_notification_runner import (
+from backend.notifications.runner import (
     WeatherNotificationRunner,
 )
 
@@ -67,13 +67,20 @@ class WeatherNotificationRunnerTests(
                     "forecast",
                     self.processor.check_forecast,
                 ),
+                call(
+                    "pending_weather_scans",
+                    (
+                        self.processor
+                        .check_pending_weather_scans
+                    ),
+                ),
             ],
         )
 
         self.assertTrue(self.runner.running)
         self.assertEqual(
             len(self.runner._tasks),
-            2,
+            3,
         )
 
     async def test_start_is_idempotent(
@@ -89,11 +96,11 @@ class WeatherNotificationRunnerTests(
 
         self.assertEqual(
             run_safely.await_count,
-            2,
+            3,
         )
         self.assertEqual(
             len(self.runner._tasks),
-            2,
+            3,
         )
 
     async def test_stop_clears_tasks(
@@ -144,7 +151,7 @@ class WeatherNotificationRunnerTests(
         with patch(
             (
                 "backend.notifications."
-                "weather_notification_runner."
+                "runner."
                 "logger.exception"
             )
         ) as log_exception:
@@ -208,7 +215,7 @@ class WeatherNotificationRunnerTests(
             patch(
                 (
                     "backend.notifications."
-                    "weather_notification_runner."
+                    "runner."
                     "asyncio.sleep"
                 ),
                 new_callable=AsyncMock,
@@ -249,7 +256,7 @@ class WeatherNotificationRunnerTests(
             patch(
                 (
                     "backend.notifications."
-                    "weather_notification_runner."
+                    "runner."
                     "asyncio.sleep"
                 ),
                 new_callable=AsyncMock,

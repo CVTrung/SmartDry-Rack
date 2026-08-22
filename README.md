@@ -23,18 +23,30 @@ code/
 ├── firebase.json           # Firebase deployment configuration
 ├── requirements.txt        # Python dependencies
 ├── backend/                # Python backend (FastAPI + core logic)
-│   ├── main.py                         # FastAPI app entry point
+│   ├── main.py                         # App startup, middleware and runner lifecycle
 │   ├── config.py                       # Environment configuration
-│   ├── models.py                       # Data models
-│   ├── control_logic.py                # Rack control decisions
+│   ├── dependencies.py                 # Shared Firebase, weather and device services
+│   ├── models.py                       # Weather and notification domain models
+│   ├── schemas.py                      # HTTP request schemas
+│   ├── routers/                        # API endpoints grouped by feature
+│   │   ├── auth.py
+│   │   ├── sensors.py
+│   │   ├── devices.py
+│   │   ├── rack.py
+│   │   └── weather.py
+│   ├── services/                       # Sensor, device and rack application logic
 │   ├── firebase/                       # Firebase services and rules
-│   ├── notifications/                  # Weather and Gmail notifications
+│   ├── notifications/                  # Weather notification workflow
+│   │   ├── policy.py                   # Rain rules and cooldown
+│   │   ├── email.py                    # Gmail formatting and delivery
+│   │   ├── broadcast.py                # Scan and account broadcasting
+│   │   └── runner.py                   # Scheduling, lease and construction
 │   └── openweather/                    # OpenWeather API client
 ├── scripts/
 │   ├── authorize_gmail.py              # Gmail sender OAuth authorization
-│   ├── authorize_account_gmail.py      # Account recipient authorization
 │   ├── create_account.py               # Device account setup
-│   └── delete_account.py               # Delete an account and device data
+│   ├── delete_account.py               # Delete an account and device data
+│   └── inject_fake_weather.py          # Inject fake weather into Firestore
 ├── tests/                              # Unit and integration tests
 ├── website/                # React frontend (Vite)
 │   ├── package.json
@@ -54,18 +66,61 @@ code/
 
 ## Firebase Database Nodes
 
-SmartDry uses both Firebase databases. Cloud Firestore stores accounts,
-devices, the location catalog, append-only weather scans, notification history,
-and operational history. Firebase Realtime Database carries the live sensor,
-configuration, rack-state, and forecast values exchanged with the ESP32 and
-website.
+SmartDry uses Firebase Authentication and both Firebase databases. Cloud
+Firestore stores accounts, devices, the location catalog, append-only weather
+scans, notification history, and operational history. Firebase Realtime
+Database is limited to the device's live sensor and control state.
 
-| Node              | Direction | Description                          |
-|-------------------|-----------|--------------------------------------|
-| `Input_Sensor`    | Device →  | Sensor readings (light, humidity)    |
-| `Input_Config`    | User →    | Device configuration & thresholds    |
-| `Output_State`    | → Device  | Rack state (extended/retracted)      |
-| `Output_Forecast` | → User    | Rain probability notifications       |
+| Node                           | Direction            | Description |
+|--------------------------------|----------------------|-------------|
+| `Input_Sensor/{device_id}`     | ESP32 → backend      | Latest light, humidity, temperature, rain and uptime values |
+| `Device_State/{device_id}`     | ESP32 ↔ backend      | Canonical `mode`, requested/current `rack_state`, device ID and update time |
+
+`Device_State` replaces the former `Input_Config` and `Output_State` split.
+The backend reads and updates this one node for `GET /api/rack/state`,
+`GET/PUT /api/device/config`, and `POST /api/rack/commands`. The ESP32 reads
+`mode` and `rack_state` from the same node and writes its latest physical or
+automatic state back to it.
+
+Weather forecasts and user notifications are not stored in
+`Output_Forecast`. They are stored in Firestore under the location weather
+history and `devices/{device_id}/notifications/{notification_id}` so that
+Realtime Database remains focused on live device state.
+
+### Sensor synchronization flow
+
+The website does not open a Realtime Database connection. FastAPI owns the
+Firebase listener for `Input_Sensor/{device_id}` and sends authenticated sensor
+events to the website through `GET /api/sensors/stream` using Server-Sent
+Events. This keeps Firebase credentials, device scoping, and validation in the
+backend.
+
+The backend also reads the latest RTDB snapshot for every enabled account once
+every five minutes and stores it at:
+
+```text
+devices/{device_id}/sensor_history/{five_minute_bucket}
+```
+
+Each document contains the sensor values, ESP32 uptime timestamp, capture time,
+five-minute bucket, storage time, and `source=realtime_database`. The bucket ID
+makes repeated scans by a restarted or duplicate backend process idempotent
+within the same five-minute window.
+
+### Backend responsibility boundaries
+
+- `main.py` creates the FastAPI app and manages background jobs.
+- `dependencies.py` owns shared service instances so routers do not create
+  separate Firebase or weather clients.
+- `routers/` handles authentication, HTTP input, status codes, and responses.
+- `services/` contains reusable sensor, device heartbeat, and rack-command
+  behavior.
+- `firebase/`, `openweather/`, and `notifications/` remain the external-system
+  adapters already used by the project.
+
+This deliberately keeps the backend shallow. `FirestoreService` remains one
+compatibility facade for existing callers; it can be split later only when a
+specific feature needs an independent repository.
 
 ### Firestore Account and Device Schema
 
@@ -156,17 +211,52 @@ notification history, and other device subcollections, run:
 python scripts/delete_account.py
 ```
 
-The setup utility asks for the account Gmail and explicit authorization to send
-weather emails to it. For an existing account, add or replace its authorized
-Gmail with:
+The setup utility records the notification Gmail but leaves it unauthorized.
+After creating the account, run the single Gmail authorization flow:
 
 ```bash
-python scripts/authorize_account_gmail.py
+python scripts/authorize_gmail.py
 ```
+
+This command first validates or creates the backend sender OAuth token. It then
+loads the one account selected by `DEVICE_ID`, asks for its notification Gmail,
+and stores explicit recipient authorization. Use `--force` only when the sender
+OAuth account itself must be authorized again.
 
 Changing an account Gmail revokes its previous authorization. Until the backend
 authorizes the new address, weather notifications are still stored in Firestore
 but their email delivery status is `skipped`.
+
+### Inject Fake Weather for an Immediate Backend Notification
+
+Start or restart the backend, then create fake current and forecast rain scans
+directly in Firestore:
+
+```bash
+python scripts/inject_fake_weather.py
+```
+
+The default writes HCM and Hanoi (`location_hn` maps to the canonical
+`location_hanoi`) using the normal scan paths:
+
+```text
+locations/{location_id}/current/{scan_id}
+locations/{location_id}/forecast/{scan_id}
+```
+
+The script marks these scans with `notification_status=pending`. The running
+backend checks pending canonical scans every two seconds, evaluates their fake
+payloads with the normal alert policy, and creates normal notification history:
+
+```text
+devices/{device_id}/notifications/{notification_id}
+```
+
+The backend then sends email to enabled authorized accounts assigned to that
+location and updates the same scan to `notification_status=processed` or
+`failed`. The script waits up to 15 seconds and prints that status; use
+`--wait-seconds 0` to write the scans without waiting. The script writes only
+weather scans and never calls Gmail directly.
 
 ### Test Weather Notifications
 

@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from backend.models import WeatherAlert
-from backend.notifications import (
+from backend.notifications.email import (
     WeatherEmailFormatter,
 )
 

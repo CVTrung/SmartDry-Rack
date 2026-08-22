@@ -10,10 +10,10 @@ from backend.models import (
     EmailStatus,
     WeatherAlert,
 )
-from backend.notifications.gmail_service import (
+from backend.notifications.email import (
     GmailSendError,
 )
-from backend.notifications.weather_notification_service import (
+from backend.notifications.broadcast import (
     WeatherNotificationService,
 )
 

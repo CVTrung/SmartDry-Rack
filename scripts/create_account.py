@@ -80,15 +80,6 @@ def main() -> None:
             "Error: Notification Gmail is required."
         )
 
-    gmail_authorized = (
-        input(
-            "Authorize weather emails to this Gmail? [y/N]: "
-        )
-        .strip()
-        .lower()
-        in {"y", "yes"}
-    )
-
     password = getpass("Password (at least 6 characters): ")
     confirmation_password = getpass("Confirm password: ")
 
@@ -100,8 +91,8 @@ def main() -> None:
     print(f"Location: {location.name} ({location_id})")
     print(f"Gmail:    {gmail}")
     print(
-        "Email notifications: "
-        + ("authorized" if gmail_authorized else "not authorized")
+        "Email notifications: not authorized "
+        "(run scripts/authorize_gmail.py after setup)"
     )
     print(
         "Coordinates: "
@@ -121,7 +112,7 @@ def main() -> None:
             display_name=display_name,
             location_id=location_id,
             gmail=gmail,
-            gmail_authorized=gmail_authorized,
+            gmail_authorized=False,
             enabled=True,
         )
         auth_service.firestore.set_location(

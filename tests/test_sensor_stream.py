@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from backend.sensor_stream import SensorEventStream
+from backend.services.sensor_stream import SensorEventStream
 
 
 class TestSensorEventStream(unittest.IsolatedAsyncioTestCase):
@@ -75,15 +75,13 @@ class TestSensorEventStream(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSensorStreamEndpoint(unittest.IsolatedAsyncioTestCase):
-    @patch("backend.main.SensorEventStream")
+    @patch("backend.routers.sensors.SensorEventStream")
     async def test_uses_authenticated_device_id(
         self,
         mock_stream_class: MagicMock,
     ) -> None:
-        from backend.main import (
-            realtime_firebase_service,
-            stream_sensor_data,
-        )
+        from backend import dependencies
+        from backend.routers.sensors import stream_sensor_data
 
         async def empty_events():
             if False:
@@ -101,7 +99,7 @@ class TestSensorStreamEndpoint(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_stream_class.assert_called_once_with(
-            service=realtime_firebase_service,
+            service=dependencies.realtime_firebase_service,
             device_id="device_001",
         )
         mock_stream.start.assert_called_once_with()

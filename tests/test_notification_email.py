@@ -10,7 +10,7 @@ from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 
 from backend.config import GmailSettings
-from backend.notifications.gmail_service import (
+from backend.notifications.email import (
     GmailAuthorizationError,
     GmailDisabledError,
     GmailNotificationService,
@@ -348,7 +348,7 @@ class GmailNotificationServiceTests(
                 patch(
                     (
                         "backend.notifications."
-                        "gmail_service.Credentials."
+                        "email.Credentials."
                         "from_authorized_user_file"
                     ),
                     return_value=credentials,
@@ -356,7 +356,7 @@ class GmailNotificationServiceTests(
                 patch(
                     (
                         "backend.notifications."
-                        "gmail_service.Request"
+                        "email.Request"
                     )
                 ) as request_class,
                 patch.object(
@@ -421,7 +421,7 @@ class GmailNotificationServiceTests(
             with patch(
                 (
                     "backend.notifications."
-                    "gmail_service.Credentials."
+                    "email.Credentials."
                     "from_authorized_user_file"
                 ),
                 return_value=credentials,

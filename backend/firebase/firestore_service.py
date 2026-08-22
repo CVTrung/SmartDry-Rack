@@ -5,6 +5,7 @@ from firebase_admin import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.api_core.exceptions import AlreadyExists
 
+from backend.config import SENSOR_HISTORY_INTERVAL_MINUTES
 from backend.firebase import get_firebase_app
 from backend.models import (
     AlertType,
@@ -18,6 +19,7 @@ class FirestoreService:
     LOCATIONS = "locations"
 
     DEVICE_HISTORY = "device_history"
+    SENSOR_HISTORY = "sensor_history"
     COMMAND_HISTORY = "command_history"
     FORECAST_HISTORY = "forecast_history"
     NOTIFICATIONS = "notifications"
@@ -160,6 +162,63 @@ class FirestoreService:
             )
 
         return value
+
+    @staticmethod
+    def _validate_sensor_values(
+        *,
+        light_lux: Any,
+        humidity_percent: Any,
+        temperature_celsius: Any,
+        rain_detected: Any,
+        sensor_timestamp: Any | None = None,
+        require_sensor_timestamp: bool = False,
+    ) -> dict[str, Any]:
+        numeric_values = {
+            "light_lux": light_lux,
+            "humidity_percent": humidity_percent,
+            "temperature_celsius": temperature_celsius,
+        }
+
+        if require_sensor_timestamp and sensor_timestamp is None:
+            raise TypeError("sensor_timestamp must be numeric")
+
+        if sensor_timestamp is not None:
+            numeric_values["sensor_timestamp"] = sensor_timestamp
+
+        for field_name, value in numeric_values.items():
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise TypeError(f"{field_name} must be numeric")
+
+        if light_lux < 0:
+            raise ValueError("light_lux must not be negative")
+
+        if not 0 <= humidity_percent <= 100:
+            raise ValueError(
+                "humidity_percent must be between 0 and 100"
+            )
+
+        if not -40 <= temperature_celsius <= 85:
+            raise ValueError(
+                "temperature_celsius must be between -40 and 85"
+            )
+
+        if sensor_timestamp is not None and sensor_timestamp < 0:
+            raise ValueError("sensor_timestamp must not be negative")
+
+        if not isinstance(rain_detected, bool):
+            raise TypeError("rain_detected must be a boolean")
+
+        values: dict[str, Any] = {
+            "light_lux": light_lux,
+            "humidity_percent": humidity_percent,
+            "temperature_celsius": temperature_celsius,
+            "rain_detected": rain_detected,
+        }
+
+        if sensor_timestamp is not None:
+            values["sensor_timestamp"] = sensor_timestamp
+
+        return values
 
     @staticmethod
     def _snapshot_to_dict(
@@ -756,37 +815,101 @@ class FirestoreService:
         rain_detected: bool,
         recorded_at: datetime | None = None,
     ) -> str:
-        if light_lux < 0:
-            raise ValueError(
-                "light_lux must not be negative"
-            )
-
-        if not 0 <= humidity_percent <= 100:
-            raise ValueError(
-                "humidity_percent must be between 0 and 100"
-            )
-
-        if not -40 <= temperature_celsius <= 85:
-            raise ValueError(
-                "temperature_celsius must be between -40 and 85"
-            )
-
-        if not isinstance(rain_detected, bool):
-            raise TypeError(
-                "rain_detected must be a boolean"
-            )
+        sensor_values = self._validate_sensor_values(
+            light_lux=light_lux,
+            humidity_percent=humidity_percent,
+            temperature_celsius=temperature_celsius,
+            rain_detected=rain_detected,
+        )
 
         return self.create_device_history(
             device_id=device_id,
             record_type="sensor",
             recorded_at=recorded_at,
-            data={
-                "light_lux": light_lux,
-                "humidity_percent": humidity_percent,
-                "temperature_celsius": temperature_celsius,
-                "rain_detected": rain_detected,
-            },
+            data=sensor_values,
         )
+
+    def save_sensor_snapshot(
+        self,
+        device_id: str,
+        sensor_data: Mapping[str, Any],
+        *,
+        captured_at: datetime | None = None,
+    ) -> str:
+        """Store one canonical five-minute RTDB sensor snapshot."""
+
+        device_id = self._validate_device_id(device_id)
+
+        if not isinstance(sensor_data, Mapping):
+            raise TypeError("sensor_data must be a mapping")
+
+        sensor_device_id = sensor_data.get("device_id")
+
+        if sensor_device_id != device_id:
+            raise ValueError(
+                "sensor_data device_id must match the destination device"
+            )
+
+        sensor_values = self._validate_sensor_values(
+            light_lux=sensor_data.get("light_lux"),
+            humidity_percent=sensor_data.get("humidity_percent"),
+            temperature_celsius=sensor_data.get("temperature_celsius"),
+            rain_detected=sensor_data.get("rain_detected"),
+            sensor_timestamp=sensor_data.get("timestamp"),
+            require_sensor_timestamp=True,
+        )
+
+        captured_at = self._validate_datetime(
+            captured_at,
+            "captured_at",
+        ) or datetime.now(timezone.utc)
+        captured_at = captured_at.astimezone(timezone.utc)
+        bucket_minute = (
+            captured_at.minute
+            // SENSOR_HISTORY_INTERVAL_MINUTES
+        ) * SENSOR_HISTORY_INTERVAL_MINUTES
+        bucket_start = captured_at.replace(
+            minute=bucket_minute,
+            second=0,
+            microsecond=0,
+        )
+        snapshot_id = bucket_start.strftime("%Y%m%dT%H%MZ")
+        snapshot_reference = (
+            self._device_reference(device_id)
+            .collection(self.SENSOR_HISTORY)
+            .document(snapshot_id)
+        )
+        snapshot_reference.set({
+            "device_id": device_id,
+            "captured_at": captured_at,
+            "bucket_start": bucket_start,
+            "stored_at": firestore.SERVER_TIMESTAMP,
+            "source": "realtime_database",
+            **sensor_values,
+        })
+
+        return snapshot_id
+
+    def get_sensor_history(
+        self,
+        device_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        device_id = self._validate_device_id(device_id)
+        limit = self._validate_limit(limit)
+        snapshots = (
+            self._device_reference(device_id)
+            .collection(self.SENSOR_HISTORY)
+            .order_by(
+                "captured_at",
+                direction=firestore.Query.DESCENDING,
+            )
+            .limit(limit)
+            .stream()
+        )
+
+        return self._snapshots_to_list(snapshots)
 
     def save_state_change(
         self,
@@ -1590,6 +1713,7 @@ class FirestoreService:
         weather: Mapping[str, Any],
         is_raining: bool,
         rain_started_at: datetime | None,
+        notification_trigger: bool = False,
     ) -> str:
         if not isinstance(weather, Mapping):
             raise TypeError(
@@ -1599,6 +1723,11 @@ class FirestoreService:
         if not isinstance(is_raining, bool):
             raise TypeError(
                 "is_raining must be a boolean"
+            )
+
+        if not isinstance(notification_trigger, bool):
+            raise TypeError(
+                "notification_trigger must be a boolean"
             )
 
         rain_started_at = self._validate_datetime(
@@ -1626,14 +1755,23 @@ class FirestoreService:
                 "Firestore did not create a current scan ID"
             )
 
-        current_reference.create({
+        payload = {
             "scan_id": scan_id,
             "scan_type": "current",
             **dict(weather),
             "is_raining": is_raining,
             "rain_started_at": rain_started_at,
             "scanned_at": firestore.SERVER_TIMESTAMP,
-        })
+        }
+
+        if notification_trigger:
+            payload.update({
+                "notification_trigger": True,
+                "notification_status": "pending",
+                "force_notify": True,
+            })
+
+        current_reference.create(payload)
 
         return scan_id
 
@@ -1673,10 +1811,16 @@ class FirestoreService:
         *,
         location_id: str,
         forecasts: list[Mapping[str, Any]],
+        notification_trigger: bool = False,
     ) -> str:
         if not isinstance(forecasts, list):
             raise TypeError(
                 "forecasts must be a list"
+            )
+
+        if not isinstance(notification_trigger, bool):
+            raise TypeError(
+                "notification_trigger must be a boolean"
             )
 
         normalized_forecasts: list[dict[str, Any]] = []
@@ -1703,7 +1847,7 @@ class FirestoreService:
                 "Firestore did not create a forecast scan ID"
             )
 
-        forecast_reference.create({
+        payload = {
             "scan_id": scan_id,
             "scan_type": "forecast",
             "items": normalized_forecasts,
@@ -1712,7 +1856,16 @@ class FirestoreService:
             ),
             "fetched_at": firestore.SERVER_TIMESTAMP,
             "scanned_at": firestore.SERVER_TIMESTAMP,
-        })
+        }
+
+        if notification_trigger:
+            payload.update({
+                "notification_trigger": True,
+                "notification_status": "pending",
+                "force_notify": True,
+            })
+
+        forecast_reference.create(payload)
 
         return scan_id
 
@@ -1757,3 +1910,119 @@ class FirestoreService:
         )
 
         return self._snapshots_to_list(snapshots)
+
+    def get_pending_weather_scans(
+        self,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise TypeError("limit must be an integer")
+
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+
+        pending: list[dict[str, Any]] = []
+
+        for location in self.get_locations():
+            location_id = location.get(
+                "location_id"
+            ) or location.get("document_id")
+
+            if not isinstance(location_id, str):
+                continue
+
+            for scan_type in ("current", "forecast"):
+                remaining = limit - len(pending)
+
+                if remaining <= 0:
+                    return pending
+
+                snapshots = (
+                    self._location_reference(location_id)
+                    .collection(scan_type)
+                    .where(
+                        filter=FieldFilter(
+                            "notification_status",
+                            "==",
+                            "pending",
+                        )
+                    )
+                    .limit(remaining)
+                    .stream()
+                )
+
+                for snapshot in snapshots:
+                    data = self._snapshot_to_dict(snapshot)
+
+                    if data is not None:
+                        pending.append({
+                            **data,
+                            "scan_id": snapshot.id,
+                            "scan_type": scan_type,
+                            "location_id": location_id,
+                        })
+
+        return pending
+
+    def get_weather_scan(
+        self,
+        *,
+        location_id: str,
+        scan_type: str,
+        scan_id: str,
+    ) -> dict[str, Any] | None:
+        if scan_type not in {"current", "forecast"}:
+            raise ValueError("scan_type must be current or forecast")
+
+        scan_id = self._validate_required_text(
+            scan_id,
+            "scan_id",
+            maximum_length=200,
+        )
+        snapshot = (
+            self._location_reference(location_id)
+            .collection(scan_type)
+            .document(scan_id)
+            .get()
+        )
+        return self._snapshot_to_dict(snapshot)
+
+    def finish_weather_scan(
+        self,
+        *,
+        location_id: str,
+        scan_type: str,
+        scan_id: str,
+        results: list[Mapping[str, Any]],
+        error: str | None = None,
+    ) -> None:
+        if scan_type not in {"current", "forecast"}:
+            raise ValueError("scan_type must be current or forecast")
+
+        scan_id = self._validate_required_text(
+            scan_id,
+            "scan_id",
+            maximum_length=200,
+        )
+        payload: dict[str, Any] = {
+            "notification_status": (
+                "failed" if error else "processed"
+            ),
+            "notification_results": [
+                dict(result) for result in results
+            ],
+            "notification_processed_at": (
+                firestore.SERVER_TIMESTAMP
+            ),
+        }
+
+        if error:
+            payload["notification_error"] = error[:500]
+
+        (
+            self._location_reference(location_id)
+            .collection(scan_type)
+            .document(scan_id)
+            .update(payload)
+        )

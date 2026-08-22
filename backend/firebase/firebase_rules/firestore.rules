@@ -163,6 +163,17 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
 
+      // Five-minute snapshots copied from Realtime Database by FastAPI.
+      match /sensor_history/{snapshotId
+      } {
+        allow get: if canReadDevice(deviceId);
+
+        allow list: if canReadDevice(deviceId)
+          && hasValidQueryLimit();
+
+        allow create, update, delete: if false;
+      }
+
       // Website, physical-button and automatic commands.
       match /command_history/{commandId
       } {

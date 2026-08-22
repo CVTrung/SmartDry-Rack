@@ -21,7 +21,7 @@ class DeviceControlAPITests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         app.dependency_overrides.pop(get_current_account, None)
 
-    @patch("backend.main.realtime_firebase_service")
+    @patch("backend.dependencies.realtime_firebase_service")
     def test_get_rack_state_from_device_state(
         self,
         realtime: MagicMock,
@@ -42,8 +42,8 @@ class DeviceControlAPITests(unittest.TestCase):
             "updated_at": 1786512000,
         })
 
-    @patch("backend.main.device_heartbeat_tracker")
-    @patch("backend.main.realtime_firebase_service")
+    @patch("backend.dependencies.device_heartbeat_tracker")
+    @patch("backend.dependencies.realtime_firebase_service")
     def test_get_device_status_uses_uptime_observer(
         self,
         realtime: MagicMock,
@@ -66,8 +66,8 @@ class DeviceControlAPITests(unittest.TestCase):
         tracker.observe.assert_called_once_with("device_001", 24)
         self.assertTrue(response.json()["online"])
 
-    @patch("backend.main.firestore_service")
-    @patch("backend.main.realtime_firebase_service")
+    @patch("backend.dependencies.firestore_service")
+    @patch("backend.dependencies.realtime_firebase_service")
     def test_put_device_mode_persists_config_history(
         self,
         realtime: MagicMock,
@@ -91,7 +91,7 @@ class DeviceControlAPITests(unittest.TestCase):
         self.assertEqual(response.json()["mode"], "manual")
         firestore.save_config_change.assert_called_once()
 
-    @patch("backend.main.rack_command_service")
+    @patch("backend.dependencies.rack_command_service")
     def test_post_command_returns_accepted_pending(
         self,
         command_service: MagicMock,
@@ -127,8 +127,8 @@ class DeviceControlAPITests(unittest.TestCase):
             idempotency_key="request_001",
         )
 
-    @patch("backend.main.firestore_service")
-    @patch("backend.main.rack_command_service")
+    @patch("backend.dependencies.firestore_service")
+    @patch("backend.dependencies.rack_command_service")
     def test_get_history_normalizes_command_dto(
         self,
         command_service: MagicMock,
