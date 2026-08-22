@@ -1,4 +1,4 @@
-# Thiết Bị Phơi Đồ Thông Minh (SmartDry-Rack)
+# SmartDry-Rack (Thiết Bị Phơi Đồ Thông Minh)
 
 An IoT-based smart clothes drying system that automatically extends/retracts
 a drying rack based on weather conditions, light, and humidity sensor data.
@@ -48,6 +48,22 @@ code/
 │   ├── delete_account.py               # Delete an account and device data
 │   └── inject_fake_weather.py          # Inject fake weather into Firestore
 ├── tests/                              # Unit and integration tests
+├── simulator/                          # ESP32 firmware and Wokwi circuit simulation
+│   ├── platformio.ini                  # ESP32 board, framework and library configuration
+│   ├── build.bat                       # Windows script for building firmware with PlatformIO
+│   ├── libraries.txt                   # Libraries used by the Wokwi simulation
+│   ├── diagram.json                    # Wokwi wiring diagram and component configuration
+│   ├── wokwi.toml                      # Wokwi simulation project configuration
+│   ├── wokwi-project.txt               # Wokwi project information
+│   ├── src/
+│   │   └── main.cpp                    # Main firmware: reads sensors, controls the rack and connects to Firebase
+│   ├── rain-sensor/                    # Custom rain sensor component for Wokwi
+│   │   ├── rain-sensor.chip.c          # Simulation logic for the rain sensor
+│   │   ├── rain-sensor.chip.json       # Component interface and pin definitions
+│   │   └── wokwi-api.h                 # Wokwi API used by the custom component
+│   ├── include/                        # Shared firmware header files
+│   ├── lib/                            # Local PlatformIO libraries
+│   └── test/                           # Firmware test directory
 ├── website/                # React frontend (Vite)
 │   ├── package.json
 │   ├── vite.config.js
@@ -63,6 +79,43 @@ code/
 ├── run_weather_notifications.bat     # Test weather notification checks
 └── run_test.bat                      # Run the Python test suite
 ```
+
+## Simulator
+
+The `simulator/` directory contains the ESP32 firmware and the Wokwi
+simulation used to test the smart drying rack without physical hardware. The
+firmware is built with PlatformIO and uses the Arduino framework.
+
+### Firmware
+
+The main firmware is located at `simulator/src/main.cpp`. It connects the
+ESP32 to Wi-Fi and Firebase, reads the DHT22 temperature and humidity sensor,
+light sensor, and rain sensor, and controls the rack through a servo motor.
+The firmware also supports a manual control button, status LED, and I2C LCD
+display. Sensor readings and rack state are synchronized with the backend
+through Firebase Realtime Database.
+
+### Wokwi Simulation
+
+The circuit and component connections are defined in
+`simulator/diagram.json`. The custom rain sensor used by the simulation is
+implemented in `simulator/rain-sensor/`, with its behavior defined in
+`rain-sensor.chip.c` and its pin interface defined in
+`rain-sensor.chip.json`. Wokwi-specific project settings are stored in
+`wokwi.toml` and `wokwi-project.txt`.
+
+### Build the Firmware
+
+From the project root, run the following commands:
+
+```bash
+cd simulator
+pio run
+```
+
+On Windows, `simulator/build.bat` provides the same PlatformIO build command.
+The required dependencies are declared in `platformio.ini`, including the
+DHT sensor, servo, MQTT, JSON, Firebase, and LCD libraries.
 
 ## Firebase Database Nodes
 
