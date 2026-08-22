@@ -35,7 +35,7 @@ class WeatherNotificationBroadcasterTests(
                 api_key="test-key",
                 latitude=0,
                 longitude=0,
-                timeout_seconds=10,
+                timeout_seconds=15,
             ),
             gmail=GmailSettings(
                 enabled=False,

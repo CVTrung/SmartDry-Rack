@@ -927,6 +927,8 @@ class FirestoreService:
         requested_at: datetime | None = None,
         status: str = "pending",
         result: Mapping[str, Any] | None = None,
+        command: str | None = None,
+        acknowledged: bool = False,
     ) -> dict[str, Any]:
         command_id = self._validate_required_text(
             command_id,
@@ -960,6 +962,17 @@ class FirestoreService:
                 "Unsupported command status"
             )
 
+        if command is not None:
+            command = command.strip().lower()
+
+            if command not in {"open", "close"}:
+                raise ValueError(
+                    "command must be either 'open' or 'close'"
+                )
+
+        if not isinstance(acknowledged, bool):
+            raise TypeError("acknowledged must be a boolean")
+
         requested_at = self._validate_datetime(
             requested_at,
             "requested_at",
@@ -978,6 +991,7 @@ class FirestoreService:
             "source": source,
             "reason": reason,
             "status": status,
+            "acknowledged": acknowledged,
             "requested_at": (
                 requested_at
                 if requested_at is not None
@@ -1001,6 +1015,9 @@ class FirestoreService:
         if result is not None:
             payload["result"] = dict(result)
 
+        if command is not None:
+            payload["command"] = command
+
         if status in self.TERMINAL_COMMAND_STATUSES:
             payload["completed_at"] = (
                 firestore.SERVER_TIMESTAMP
@@ -1009,17 +1026,17 @@ class FirestoreService:
         # Prevent accidental replacement of an existing command.
         command_reference.create(payload)
 
-        command = self.get_command_history(
+        saved_command = self.get_command_history(
             command_id,
             device_id,
         )
 
-        if command is None:
+        if saved_command is None:
             raise RuntimeError(
                 "Command was created but could not be read"
             )
 
-        return command
+        return saved_command
 
     def update_command_status(
         self,

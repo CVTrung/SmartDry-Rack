@@ -3,10 +3,12 @@ import {
   auth,
   isFirebaseConfigured,
 } from '../firebase.js';
+import { getRackState } from './deviceControlService.js';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL
   || 'http://localhost:8000';
+const RACK_STATE_POLL_INTERVAL_MS = 3000;
 
 function assertAuthenticated() {
   if (
@@ -52,21 +54,46 @@ export async function getRainForecast({ signal } = {}) {
   return data.items;
 }
 
-export function subscribeToRackState({ onError }) {
-  try {
-    assertAuthenticated();
-    onError(
-      new Error(
-        'Backend chưa cung cấp API trạng thái giàn phơi.',
-      ),
-    );
-  } catch (error) {
-    onError(
-      error instanceof Error
-        ? error
-        : new Error('Không thể đọc trạng thái giàn phơi.'),
-    );
+export function subscribeToRackState({ onData, onError }) {
+  const abortController = new AbortController();
+  let timeoutId = null;
+  let stopped = false;
+
+  async function poll() {
+    try {
+      const data = await getRackState({
+        signal: abortController.signal,
+      });
+
+      if (!stopped) {
+        onData(data);
+      }
+    } catch (error) {
+      if (!stopped && error?.name !== 'AbortError') {
+        onError(
+          error instanceof Error
+            ? error
+            : new Error('Không thể đọc trạng thái giàn phơi.'),
+        );
+      }
+    }
+
+    if (!stopped) {
+      timeoutId = window.setTimeout(
+        poll,
+        RACK_STATE_POLL_INTERVAL_MS,
+      );
+    }
   }
 
-  return () => {};
+  poll();
+
+  return () => {
+    stopped = true;
+    abortController.abort();
+
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  };
 }

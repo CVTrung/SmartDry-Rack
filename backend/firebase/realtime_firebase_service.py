@@ -1,4 +1,5 @@
 import time
+import threading
 from typing import Any, Callable
 
 from firebase_admin import db
@@ -9,12 +10,16 @@ from backend.firebase import get_firebase_app
 class RealtimeFirebaseServiceError(RuntimeError):
     """Raised when Realtime Database data is invalid."""
 
-
 class RealtimeFirebaseService:
     INPUT_SENSOR = "Input_Sensor"
+    LEGACY_INPUT_SENSOR = "Input_sensor"
     INPUT_CONFIG = "Input_Config"
     OUTPUT_STATE = "Output_State"
     OUTPUT_FORECAST = "Output_Forecast"
+    DEVICE_STATE = "Device_State"
+
+    _command_locks_guard = threading.Lock()
+    _command_locks: dict[str, threading.Lock] = {}
     
     def __init__(self) -> None:
         self.app = get_firebase_app()
@@ -148,6 +153,40 @@ class RealtimeFirebaseService:
             self.INPUT_SENSOR,
         )
 
+    def get_sensor_timestamp(
+        self,
+        device_id: str,
+    ) -> int | float | None:
+        """Read the device uptime timestamp used by heartbeat checks.
+
+        ``Input_Sensor`` is the canonical node used by the current
+        simulator. ``Input_sensor`` is retained as a read-only fallback for
+        older deployments whose Firebase keys used different casing.
+        """
+
+        device_id = self._validate_device_id(device_id)
+        result = self._reference(
+            f"{self.INPUT_SENSOR}/{device_id}/timestamp"
+        ).get()
+
+        if result is None:
+            result = self._reference(
+                f"{self.LEGACY_INPUT_SENSOR}/{device_id}/timestamp"
+            ).get()
+
+        if result is None:
+            return None
+
+        if (
+            not isinstance(result, (int, float))
+            or isinstance(result, bool)
+        ):
+            raise RealtimeFirebaseServiceError(
+                "Input_Sensor timestamp must be numeric"
+            )
+
+        return result
+
     def listen_sensor_data(
         self,
         device_id: str,
@@ -207,18 +246,106 @@ class RealtimeFirebaseService:
             self.INPUT_CONFIG,
         )
 
-    def listen_device_config(
+    # =========================================================
+    # Device_State
+    # Website/backend writes the desired rack state and manual mode.
+    # =========================================================
+
+    def get_device_state(
         self,
         device_id: str,
-        callback: Callable[[db.Event], None],
-    ) -> db.ListenerRegistration:
-        """Listen for device configuration changes."""
+    ) -> dict[str, Any] | None:
+        device_id = self._validate_device_id(device_id)
+        result = self._reference(
+            f"{self.DEVICE_STATE}/{device_id}"
+        ).get()
+
+        return self._validate_dictionary(
+            result,
+            self.DEVICE_STATE,
+        )
+
+    def set_device_mode(
+        self,
+        device_id: str,
+        mode: str,
+    ) -> dict[str, Any]:
+        device_id = self._validate_device_id(device_id)
+        mode = mode.strip().lower()
+
+        if mode not in {"auto", "manual"}:
+            raise ValueError(
+                "mode must be either 'auto' or 'manual'"
+            )
+
+        updated_at = self._timestamp()
+        self._reference(
+            f"{self.DEVICE_STATE}/{device_id}"
+        ).update({
+            "device_id": device_id,
+            "mode": mode,
+            "updated_at": updated_at,
+        })
+
+        return {
+            "device_id": device_id,
+            "mode": mode,
+            "updated_at": updated_at,
+        }
+
+    @classmethod
+    def command_lock(
+        cls,
+        device_id: str,
+    ) -> threading.Lock:
+        """Return the in-process serialization lock for one device."""
+
+        device_id = cls._validate_device_id(device_id)
+
+        with cls._command_locks_guard:
+            return cls._command_locks.setdefault(
+                device_id,
+                threading.Lock(),
+            )
+
+    def set_rack_command(
+        self,
+        device_id: str,
+        command: str,
+    ) -> dict[str, Any]:
+        """Atomically switch to manual mode and set desired rack state."""
 
         device_id = self._validate_device_id(device_id)
+        command = command.strip().lower()
 
-        return self._reference(
-            f"{self.INPUT_CONFIG}/{device_id}"
-        ).listen(callback)
+        if command not in {"open", "close"}:
+            raise ValueError(
+                "command must be either 'open' or 'close'"
+            )
+
+        timestamp = self._timestamp()
+        rack_state = (
+            "extended"
+            if command == "open"
+            else "retracted"
+        )
+        state_path = f"{self.DEVICE_STATE}/{device_id}"
+        updates = {
+            f"{state_path}/device_id": device_id,
+            f"{state_path}/mode": "manual",
+            f"{state_path}/rack_state": rack_state,
+            f"{state_path}/updated_at": timestamp,
+        }
+
+        self._reference("/").update(updates)
+
+        return {
+            "device_id": device_id,
+            "command": command,
+            "rack_state": rack_state,
+            "timestamp": timestamp,
+            "mode": "manual",
+        }
 
     # =========================================================
     # Output_State
@@ -284,19 +411,6 @@ class RealtimeFirebaseService:
             result,
             self.OUTPUT_STATE,
         )
-
-    def listen_output_state(
-        self,
-        device_id: str,
-        callback: Callable[[db.Event], None],
-    ) -> db.ListenerRegistration:
-        """Listen for rack state changes."""
-
-        device_id = self._validate_device_id(device_id)
-
-        return self._reference(
-            f"{self.OUTPUT_STATE}/{device_id}"
-        ).listen(callback)
 
     # =========================================================
     # Output_Forecast

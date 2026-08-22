@@ -644,6 +644,14 @@ input:disabled {
   border-top-color: #dc2626;
 }
 
+.device-connection-card.checking {
+  border-top-color: #2563eb;
+}
+
+.device-connection-card.unknown {
+  border-top-color: #9ca3af;
+}
+
 .device-connection-copy h2,
 .rack-control-card h2,
 .history-empty-state h2 {
@@ -661,6 +669,10 @@ input:disabled {
 
 .device-connection-card.offline .device-connection-copy h2 {
   color: #b91c1c;
+}
+
+.device-connection-card.checking .device-connection-copy h2 {
+  color: #1d4ed8;
 }
 
 .heartbeat-detail {
@@ -725,6 +737,54 @@ input:disabled {
   transform: translateX(20px);
 }
 
+.device-status-badge {
+  display: inline-flex;
+  align-self: center;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  color: #4b5563;
+  border-radius: 999px;
+  background: #f3f4f6;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.device-status-badge > span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.device-status-badge.online {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.device-status-badge.online > span {
+  background: #16a34a;
+}
+
+.device-status-badge.offline {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.device-status-badge.offline > span {
+  background: #dc2626;
+}
+
+.device-status-badge.checking {
+  color: #1e40af;
+  background: #dbeafe;
+}
+
+.device-status-badge.checking > span {
+  background: #2563eb;
+}
+
 .device-metadata {
   display: grid;
   grid-column: 1 / -1;
@@ -771,6 +831,56 @@ input:disabled {
 
 .rack-control-card h2 {
   font-size: 1.3rem;
+}
+
+.rack-live-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.rack-live-summary > div {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-height: 128px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #f9fafb;
+}
+
+.rack-live-summary > div > span {
+  color: #6b7280;
+  font-size: 0.76rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rack-live-summary small,
+.rack-command-button small {
+  color: #6b7280;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.rack-state-value {
+  color: #4b5563;
+  font-size: 1.18rem;
+}
+
+.rack-state-value.extended {
+  color: #15803d;
+}
+
+.rack-state-value.retracted,
+.rack-state-value.error {
+  color: #b91c1c;
+}
+
+.operating-mode-control .connection-switch {
+  justify-self: start;
 }
 
 .pending-badge {
@@ -864,6 +974,12 @@ input:disabled {
   font-size: 1.05rem;
 }
 
+.rack-command-button small {
+  display: block;
+  margin-top: 5px;
+  color: rgb(255 255 255 / 78%);
+}
+
 .monitor-alert,
 .command-feedback {
   margin: 0;
@@ -896,10 +1012,18 @@ input:disabled {
   background: #fff7ed;
 }
 
-.command-feedback.completed {
+.command-feedback.accepted {
   color: #166534;
   border: 1px solid #bbf7d0;
   background: #f0fdf4;
+}
+
+.history-inline-empty {
+  margin: 0;
+  padding: 14px;
+  color: #6b7280;
+  border-radius: 11px;
+  background: #f9fafb;
 }
 
 .history-empty-state h2 {
@@ -939,10 +1063,14 @@ input:disabled {
   background: #dcfce7;
 }
 
-.history-result.failed,
-.history-result.timeout {
+.history-result.failed {
   color: #991b1b;
   background: #fee2e2;
+}
+
+.history-result.pending {
+  color: #9a3412;
+  background: #ffedd5;
 }
 
 .history-command-copy h2 {
@@ -994,6 +1122,10 @@ input:disabled {
   }
 
   .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rack-live-summary {
     grid-template-columns: 1fr;
   }
 

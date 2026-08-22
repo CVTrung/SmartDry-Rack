@@ -1,36 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useAuth } from '../auth/AuthContext.jsx';
 import {
-  getMockCommand,
-  getMockSimulation,
-  isMockIotMode,
-  recordMockCommandResult,
-  refreshMockHeartbeat,
-  setMockDeviceOnline,
-  subscribeToMockIotState,
-} from '../mocks/iotMockStore.js';
+  getDeviceConfig,
+  getDeviceStatus,
+  getRackState,
+  sendRackCommand,
+  updateDeviceConfig,
+} from '../services/deviceControlService.js';
 
-const ONLINE_THRESHOLD_MS = 30_000;
-const HEARTBEAT_INTERVAL_MS = 10_000;
+const LIVE_POLL_INTERVAL_MS = 2000;
 
 const timestampFormatter = new Intl.DateTimeFormat('vi-VN', {
   dateStyle: 'medium',
   timeStyle: 'medium',
 });
 
-function formatTimestamp(value) {
+const rackStateLabels = {
+  error: 'Lỗi',
+  extended: 'Yêu cầu phơi',
+  retracted: 'Yêu cầu thu',
+};
+
+function formatEpochSeconds(value) {
   const timestamp = Number(value);
 
   if (!Number.isFinite(timestamp) || timestamp <= 0) {
-    return 'Chưa có heartbeat';
+    return 'Chưa có dữ liệu'; 
   }
 
-  return timestampFormatter.format(new Date(timestamp));
+  return timestampFormatter.format(new Date(timestamp * 1000));
 }
 
-function getRandomDelay({ ack_delay_min_ms: min, ack_delay_max_ms: max }) {
-  return Math.round(min + (Math.random() * (max - min)));
+function formatDurationSeconds(value) {
+  const seconds = Number(value);
+
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return '—';
+  }
+
+  return `${Math.round(seconds * 10) / 10}s`;
+}
+
+function getCommandLabel(command) {
+  return command === 'open' ? 'Phơi đồ' : 'Thu đồ';
 }
 
 export default function MonitorPage() {
@@ -38,182 +51,240 @@ export default function MonitorPage() {
   const deviceId = user?.device_id;
   const [deviceStatus, setDeviceStatus] = useState(null);
   const [hasCheckedStatus, setHasCheckedStatus] = useState(false);
+  const [livePollingStopped, setLivePollingStopped] = useState(false);
   const [statusError, setStatusError] = useState('');
-  const [now, setNow] = useState(Date.now());
+  const [rackData, setRackData] = useState(null);
+  const [rackError, setRackError] = useState('');
+  const [deviceConfig, setDeviceConfig] = useState(null);
+  const [configError, setConfigError] = useState('');
+  const [modeUpdating, setModeUpdating] = useState(false);
+  const [modeFeedback, setModeFeedback] = useState('');
   const [pendingCommand, setPendingCommand] = useState(null);
   const [commandFeedback, setCommandFeedback] = useState(null);
-  const [nextOutcome, setNextOutcome] = useState('success');
-  const commandTimerRef = useRef(null);
+  const commandAbortControllerRef = useRef(null);
   const pendingCommandRef = useRef(null);
+  const modeUpdateRef = useRef(false);
 
   useEffect(() => {
-    const clock = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(clock);
-  }, []);
+    const abortController = new AbortController();
+    let timeoutId = null;
+    let stopped = false;
 
-  useEffect(() => {
     setDeviceStatus(null);
     setHasCheckedStatus(false);
+    setLivePollingStopped(false);
     setStatusError('');
+    setRackData(null);
+    setRackError('');
+    setDeviceConfig(null);
+    setConfigError('');
 
     if (!deviceId) {
       setStatusError('Không xác định được Device ID.');
+      setRackError('Không xác định được Device ID.');
+      setConfigError('Không xác định được Device ID.');
       setHasCheckedStatus(true);
-      return () => {};
+      return () => abortController.abort();
     }
 
-    if (isMockIotMode) {
-      const unsubscribe = subscribeToMockIotState(
-        deviceId,
-        (state) => {
-          setDeviceStatus(state.deviceStatus);
-          setHasCheckedStatus(true);
-          setStatusError('');
-        },
-      );
-      refreshMockHeartbeat(deviceId);
-      const heartbeat = window.setInterval(
-        () => refreshMockHeartbeat(deviceId),
-        HEARTBEAT_INTERVAL_MS,
+    async function pollLiveState() {
+      let shouldPollAgain = true;
+      const [statusResult, rackResult, configResult] = (
+        await Promise.allSettled([
+          getDeviceStatus({ signal: abortController.signal }),
+          getRackState({ signal: abortController.signal }),
+          getDeviceConfig({ signal: abortController.signal }),
+        ])
       );
 
-      return () => {
-        unsubscribe();
-        window.clearInterval(heartbeat);
-      };
+      if (stopped) {
+        return;
+      }
+
+      setHasCheckedStatus(true);
+
+      if (statusResult.status === 'fulfilled') {
+        const nextStatus = statusResult.value;
+        const staleSeconds = Number(nextStatus?.stale_for_seconds);
+        const timeoutSeconds = Number(nextStatus?.timeout_seconds);
+        const exceededOfflineThreshold = (
+          nextStatus?.status === 'offline'
+          && (
+            nextStatus?.sensor_timestamp == null
+            || (
+              Number.isFinite(staleSeconds)
+              && Number.isFinite(timeoutSeconds)
+              && staleSeconds >= timeoutSeconds
+            )
+          )
+        );
+
+        setDeviceStatus(nextStatus);
+        setStatusError('');
+
+        if (exceededOfflineThreshold) {
+          shouldPollAgain = false;
+          setLivePollingStopped(true);
+        }
+      } else if (statusResult.reason?.name !== 'AbortError') {
+        setStatusError(
+          statusResult.reason?.message
+          || 'Không thể đọc trạng thái kết nối ESP32.',
+        );
+      }
+
+      if (rackResult.status === 'fulfilled') {
+        setRackData(rackResult.value);
+        setRackError('');
+      } else if (rackResult.reason?.name !== 'AbortError') {
+        setRackError(
+          rackResult.reason?.message
+          || 'Không thể đọc trạng thái giàn phơi.',
+        );
+      }
+
+      if (configResult.status === 'fulfilled') {
+        setDeviceConfig(configResult.value);
+        setConfigError('');
+      } else if (configResult.reason?.name !== 'AbortError') {
+        setConfigError(
+          configResult.reason?.message
+          || 'Không thể đọc chế độ vận hành.',
+        );
+      }
+
+      if (shouldPollAgain) {
+        timeoutId = window.setTimeout(
+          pollLiveState,
+          LIVE_POLL_INTERVAL_MS,
+        );
+      }
     }
 
-    setStatusError(
-      'Backend chưa cung cấp API trạng thái kết nối ESP32.',
-    );
-    setHasCheckedStatus(true);
-    return () => {};
+    pollLiveState();
+
+    return () => {
+      stopped = true;
+      abortController.abort();
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, [deviceId]);
 
   useEffect(() => () => {
-    if (commandTimerRef.current !== null) {
-      window.clearTimeout(commandTimerRef.current);
-    }
+    commandAbortControllerRef.current?.abort();
   }, []);
 
-  const lastSeenValue = deviceStatus?.last_seen;
-  const lastSeen = lastSeenValue === undefined
-    || lastSeenValue === null
-    || lastSeenValue === ''
-    ? Number.NaN
-    : Number(lastSeenValue);
-  const heartbeatAge = Number.isFinite(lastSeen)
-    ? now - lastSeen
-    : Number.POSITIVE_INFINITY;
-  const isOnline = hasCheckedStatus
-    && !statusError
-    && heartbeatAge <= ONLINE_THRESHOLD_MS;
+  const isOnline = !statusError && deviceStatus?.online === true;
   const connectionState = !hasCheckedStatus
     ? 'checking'
-    : isOnline
-      ? 'online'
-      : 'offline';
+    : statusError
+      ? 'unknown'
+      : deviceStatus?.status === 'checking'
+        ? 'checking'
+      : isOnline
+        ? 'online'
+        : 'offline';
   const connectionLabel = {
     checking: 'Đang kiểm tra',
-    online: 'Đã kết nối',
     offline: 'Mất kết nối',
+    online: 'Đã kết nối',
+    unknown: 'Chưa xác định',
   }[connectionState];
-  const heartbeatDetail = useMemo(() => {
-    if (!Number.isFinite(lastSeen)) {
-      return 'Thiết bị chưa gửi heartbeat.';
-    }
+  const mode = deviceConfig?.mode || rackData?.mode || null;
+  const rackState = rackData?.rack_state || null;
+  const controlsDisabled = (
+    !isOnline
+    || pendingCommand !== null
+    || modeUpdating
+  );
 
-    const secondsAgo = Math.max(0, Math.floor(heartbeatAge / 1000));
-    return `${formatTimestamp(lastSeen)} · ${secondsAgo} giây trước`;
-  }, [heartbeatAge, lastSeen]);
-  const controlsDisabled = !isMockIotMode
-    || !isOnline
-    || pendingCommand !== null;
-
-  function handleConnectionToggle() {
-    if (!isMockIotMode || pendingCommandRef.current || !deviceId) {
-      return;
-    }
-
-    setMockDeviceOnline(deviceId, !isOnline);
-    setCommandFeedback(null);
-  }
-
-  function finishCommand({ action, requestedAt, status, error = '' }) {
-    recordMockCommandResult({
-      action,
-      deviceId,
-      error,
-      requestedAt,
-      status,
-    });
-    pendingCommandRef.current = null;
-    setPendingCommand(null);
-
-    if (status === 'completed') {
-      setCommandFeedback({
-        phase: 'completed',
-        message: getMockCommand(action).completed_label,
-      });
-      return;
-    }
-
-    setCommandFeedback({
-      phase: 'failed',
-      message: error,
-    });
-  }
-
-  function handleCommand(action) {
+  async function handleModeToggle() {
     if (
-      !isMockIotMode
-      || !isOnline
+      (mode !== 'auto' && mode !== 'manual')
+      || modeUpdateRef.current
+      || pendingCommandRef.current
+    ) {
+      return;
+    }
+
+    const nextMode = mode === 'auto' ? 'manual' : 'auto';
+    modeUpdateRef.current = true;
+    setModeUpdating(true);
+    setModeFeedback('');
+    setConfigError('');
+
+    try {
+      const updatedConfig = await updateDeviceConfig(nextMode);
+      setDeviceConfig(updatedConfig);
+      setRackData((current) => (
+        current ? { ...current, mode: updatedConfig.mode } : current
+      ));
+      setModeFeedback(
+        nextMode === 'auto'
+          ? 'Đã bật chế độ tự động.'
+          : 'Đã chuyển sang điều khiển thủ công.',
+      );
+    } catch (error) {
+      setConfigError(
+        error?.message || 'Không thể cập nhật chế độ vận hành.',
+      );
+    } finally {
+      modeUpdateRef.current = false;
+      setModeUpdating(false);
+    }
+  }
+
+  async function handleCommand(command) {
+    if (
+      controlsDisabled
       || pendingCommandRef.current
       || !deviceId
     ) {
       return;
     }
 
-    const command = getMockCommand(action);
-    const simulation = getMockSimulation();
-    const requestedAt = Date.now();
-    const pending = { action, requestedAt };
+    const pending = { command };
+    const abortController = new AbortController();
+    commandAbortControllerRef.current = abortController;
     pendingCommandRef.current = pending;
     setPendingCommand(pending);
     setCommandFeedback({
+      message: `Đang gửi lệnh ${getCommandLabel(command)}…`,
       phase: 'pending',
-      message: command.pending_label,
     });
 
-    if (nextOutcome === 'timeout') {
-      commandTimerRef.current = window.setTimeout(() => {
-        finishCommand({
-          action,
-          requestedAt,
-          status: 'timeout',
-          error: 'Thiết bị không phản hồi ACK trong 12 giây.',
-        });
-      }, simulation.command_timeout_ms);
-      return;
-    }
-
-    commandTimerRef.current = window.setTimeout(() => {
-      if (nextOutcome === 'failure') {
-        finishCommand({
-          action,
-          requestedAt,
-          status: 'failed',
-          error: 'Thiết bị từ chối lệnh mô phỏng.',
-        });
-        return;
-      }
-
-      finishCommand({
-        action,
-        requestedAt,
-        status: 'completed',
+    try {
+      const acceptedCommand = await sendRackCommand(command, {
+        signal: abortController.signal,
       });
-    }, getRandomDelay(simulation));
+
+      setDeviceConfig((current) => ({
+        ...current,
+        device_id: acceptedCommand.device_id,
+        mode: acceptedCommand.mode,
+      }));
+      setRackData((current) => (
+        current ? { ...current, mode: acceptedCommand.mode } : current
+      ));
+      setCommandFeedback({
+        message: `Đã gửi yêu cầu ${getCommandLabel(command)}.`,
+        phase: 'accepted',
+      });
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        setCommandFeedback({
+          message: error?.message || 'Không thể gửi lệnh tới giàn phơi.',
+          phase: 'failed',
+        });
+      }
+    } finally {
+      commandAbortControllerRef.current = null;
+      pendingCommandRef.current = null;
+      setPendingCommand(null);
+    }
   }
 
   return (
@@ -221,11 +292,9 @@ export default function MonitorPage() {
       <header className="monitor-heading">
         <div>
           <p className="monitor-eyebrow">ESP32 / Wokwi</p>
-          <h1 id="monitor-title">Monitor Page</h1>
+          <h1 id="monitor-title">Điều khiển giàn phơi</h1>
         </div>
-        <span className={`iot-mode-badge ${isMockIotMode ? 'mock' : 'live'}`}>
-          {isMockIotMode ? 'MOCK MODE' : 'LIVE MODE'}
-        </span>
+        <span className="iot-mode-badge live">LIVE MODE</span>
       </header>
 
       <article
@@ -235,49 +304,42 @@ export default function MonitorPage() {
         <div className="device-connection-copy">
           <p className="monitor-card-kicker">Trạng thái kết nối ESP32</p>
           <h2 id="device-connection-title">{connectionLabel}</h2>
-          <p className="heartbeat-detail">Heartbeat: {heartbeatDetail}</p>
+          <p className="heartbeat-detail">
+            {deviceStatus?.sensor_timestamp == null
+              ? 'Chưa nhận được heartbeat từ Wokwi.'
+              : `Wokwi uptime: ${deviceStatus.sensor_timestamp} giây.`}
+          </p>
         </div>
 
-        <button
-          type="button"
-          className="connection-switch"
-          role="switch"
-          aria-checked={isOnline}
-          aria-label="Trạng thái kết nối thiết bị"
-          aria-readonly={!isMockIotMode}
-          disabled={!isMockIotMode || pendingCommand !== null}
-          onClick={handleConnectionToggle}
-        >
-          <span className="switch-track" aria-hidden="true">
-            <span className="switch-thumb" />
-          </span>
-          <span>{isOnline ? 'Bật' : 'Tắt'}</span>
-        </button>
+        <span className={`device-status-badge ${connectionState}`} role="status">
+          <span aria-hidden="true" />
+          {deviceStatus?.status || connectionState}
+        </span>
 
         <dl className="device-metadata">
           <div>
             <dt>Device ID</dt>
-            <dd>{deviceId || '—'}</dd>
+            <dd>{deviceStatus?.device_id || deviceId || '—'}</dd>
           </div>
           <div>
-            <dt>Simulator</dt>
-            <dd>{deviceStatus?.simulator || '—'}</dd>
+            <dt>Heartbeat đổi lần cuối</dt>
+            <dd>
+              {formatEpochSeconds(deviceStatus?.last_change_observed_at)}
+            </dd>
           </div>
           <div>
-            <dt>Firmware</dt>
-            <dd>{deviceStatus?.firmware_version || '—'}</dd>
+            <dt>Độ trễ / Ngưỡng offline</dt>
+            <dd>
+              {formatDurationSeconds(deviceStatus?.stale_for_seconds)}
+              {' / '}
+              {formatDurationSeconds(deviceStatus?.timeout_seconds)}
+            </dd>
           </div>
         </dl>
 
-        {!isMockIotMode && (
-          <p className="read-only-note">
-            Switch chỉ phản ánh heartbeat và được khóa trong Live Mode.
-          </p>
-        )}
-
         {statusError && (
           <p className="monitor-alert error" role="alert">
-            {statusError}
+            {statusError} Hệ thống sẽ tự thử lại.
           </p>
         )}
       </article>
@@ -296,19 +358,65 @@ export default function MonitorPage() {
           )}
         </header>
 
-        {isMockIotMode && (
-          <label className="mock-outcome-control">
-            Kết quả lệnh tiếp theo
-            <select
-              value={nextOutcome}
-              disabled={pendingCommand !== null}
-              onChange={(event) => setNextOutcome(event.target.value)}
+        <div className="rack-live-summary">
+          <div>
+            <span>Trạng thái yêu cầu trên Firebase</span>
+            <strong className={`rack-state-value ${rackState || 'unknown'}`}>
+              {rackStateLabels[rackState] || 'Chưa có dữ liệu'}
+            </strong>
+            <small>
+              Cập nhật: {formatEpochSeconds(rackData?.updated_at)}
+            </small>
+          </div>
+
+          <div className="operating-mode-control">
+            <span>Chế độ vận hành</span>
+            <button
+              type="button"
+              className="connection-switch"
+              role="switch"
+              aria-checked={mode === 'auto'}
+              aria-label="Chuyển chế độ tự động hoặc thủ công"
+              disabled={
+                (mode !== 'auto' && mode !== 'manual')
+                || modeUpdating
+                || pendingCommand !== null
+              }
+              onClick={handleModeToggle}
             >
-              <option value="success">Thành công</option>
-              <option value="failure">Thất bại</option>
-              <option value="timeout">Timeout (12 giây)</option>
-            </select>
-          </label>
+              <span className="switch-track" aria-hidden="true">
+                <span className="switch-thumb" />
+              </span>
+              <span>
+                {modeUpdating
+                  ? 'Đang cập nhật…'
+                  : mode === 'auto'
+                    ? 'Tự động'
+                    : mode === 'manual'
+                      ? 'Thủ công'
+                      : 'Chưa xác định'}
+              </span>
+            </button>
+            <small>Lệnh từ web luôn chuyển thiết bị sang thủ công.</small>
+          </div>
+        </div>
+
+        {rackError && (
+          <p className="monitor-alert error" role="alert">
+            {rackError} Hệ thống sẽ tự thử lại.
+          </p>
+        )}
+
+        {configError && (
+          <p className="monitor-alert error" role="alert">
+            {configError} Hệ thống sẽ tự thử lại.
+          </p>
+        )}
+
+        {modeFeedback && !configError && (
+          <p className="command-feedback accepted" role="status">
+            {modeFeedback}
+          </p>
         )}
 
         <div className="rack-command-grid">
@@ -316,11 +424,12 @@ export default function MonitorPage() {
             type="button"
             className="rack-command-button extend"
             disabled={controlsDisabled}
-            onClick={() => handleCommand('extend')}
+            onClick={() => handleCommand('open')}
           >
             <span className="command-icon" aria-hidden="true">↗</span>
             <span>
               <strong>Phơi đồ</strong>
+              <small>Gửi command: open</small>
             </span>
           </button>
 
@@ -328,25 +437,25 @@ export default function MonitorPage() {
             type="button"
             className="rack-command-button retract"
             disabled={controlsDisabled}
-            onClick={() => handleCommand('retract')}
+            onClick={() => handleCommand('close')}
           >
             <span className="command-icon" aria-hidden="true">↙</span>
             <span>
               <strong>Thu đồ</strong>
+              <small>Gửi command: close</small>
             </span>
           </button>
         </div>
 
-        {!isMockIotMode && (
-          <p className="monitor-alert info" role="status">
-            Hai lệnh đang được khóa vì backend chưa có command/ACK endpoint.
-            Chuyển sang <code>VITE_IOT_MODE=mock</code> để chạy MVP mock.
-          </p>
-        )}
-
-        {isMockIotMode && !isOnline && (
+        {livePollingStopped ? (
           <p className="monitor-alert error" role="status">
-            Thiết bị đang offline. Không thể gửi lệnh.
+            Heartbeat đã vượt ngưỡng offline. Hệ thống đã dừng kiểm tra
+            LIVE; tải lại trang để bắt đầu kiểm tra lại.
+          </p>
+        ) : !isOnline && hasCheckedStatus && (
+          <p className="monitor-alert error" role="status">
+            ESP32 đang offline hoặc còn trong giai đoạn kiểm tra heartbeat.
+            Tạm thời không thể gửi lệnh.
           </p>
         )}
 
@@ -360,6 +469,7 @@ export default function MonitorPage() {
           </p>
         )}
       </article>
+
     </section>
   );
 }

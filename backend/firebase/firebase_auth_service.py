@@ -12,7 +12,6 @@ DEVICE_ID_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 
 class FirebaseAuthService:
     LOGIN_EMAIL_DOMAIN = "smartdry.local"
-    FIRMWARE_UID_PREFIX = "firmware_"
 
     def __init__(
         self,
@@ -144,51 +143,6 @@ class FirebaseAuthService:
 
         return decoded_token
 
-    def update_password(
-        self,
-        device_id: str,
-        new_password: str,
-    ) -> None:
-        device_id = self._validate_device_id(device_id)
-        new_password = self._validate_password(new_password)
-
-        auth.update_user(
-            device_id,
-            password=new_password,
-            app=self.app,
-        )
-
-    def set_account_enabled(
-        self,
-        device_id: str,
-        enabled: bool,
-    ) -> None:
-        device_id = self._validate_device_id(device_id)
-
-        if not isinstance(enabled, bool):
-            raise TypeError(
-                "enabled must be a boolean"
-            )
-
-        auth.update_user(
-            device_id,
-            disabled=not enabled,
-            app=self.app,
-        )
-
-        try:
-            self.firestore.update_account(
-                device_id,
-                enabled=enabled,
-            )
-        except Exception:
-            auth.update_user(
-                device_id,
-                disabled=enabled,
-                app=self.app,
-            )
-            raise
-
     def delete_device_account(
         self,
         device_id: str,
@@ -205,25 +159,6 @@ class FirebaseAuthService:
             pass
 
         self.firestore.delete_account(device_id)
-
-    def create_firmware_custom_token(
-        self,
-        device_id: str,
-    ) -> bytes:
-        device_id = self._validate_device_id(device_id)
-
-        firmware_uid = (
-            f"{self.FIRMWARE_UID_PREFIX}{device_id}"
-        )
-
-        return auth.create_custom_token(
-            firmware_uid,
-            {
-                "role": "device",
-                "device_id": device_id,
-            },
-            app=self.app,
-        )
 
     def get_account_from_id_token(
         self,

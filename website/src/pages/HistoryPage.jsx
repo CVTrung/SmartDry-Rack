@@ -1,50 +1,60 @@
 import { useEffect, useState } from 'react';
 
-import { useAuth } from '../auth/AuthContext.jsx';
-import {
-  getMockIotState,
-  isMockIotMode,
-  subscribeToMockIotState,
-} from '../mocks/iotMockStore.js';
+import ActivityHistoryList from '../components/ActivityHistoryList.jsx';
+import { getCommandHistory } from '../services/deviceControlService.js';
 
-const timestampFormatter = new Intl.DateTimeFormat('vi-VN', {
-  dateStyle: 'medium',
-  timeStyle: 'medium',
-});
-
-const rackStateLabels = {
-  extended: 'Đang phơi',
-  retracted: 'Đã thu',
-  error: 'Lỗi',
-};
-
-const resultLabels = {
-  completed: 'Hoàn tất',
-  failed: 'Thất bại',
-  timeout: 'Timeout',
-};
-
-function formatTimestamp(value) {
-  const timestamp = Number(value);
-  return Number.isFinite(timestamp) && timestamp > 0
-    ? timestampFormatter.format(new Date(timestamp))
-    : '—';
-}
+const HISTORY_POLL_INTERVAL_MS = 5000;
 
 export default function HistoryPage() {
-  const { user } = useAuth();
-  const deviceId = user?.device_id;
-  const [mockState, setMockState] = useState(() => (
-    getMockIotState(deviceId)
-  ));
+  const [items, setItems] = useState([]);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [historyError, setHistoryError] = useState('');
 
   useEffect(() => {
-    if (!isMockIotMode || !deviceId) {
-      return () => {};
+    const abortController = new AbortController();
+    let timeoutId = null;
+    let stopped = false;
+
+    async function pollHistory() {
+      try {
+        const historyItems = await getCommandHistory({
+          limit: 50,
+          signal: abortController.signal,
+        });
+
+        if (!stopped) {
+          setItems(historyItems);
+          setHasLoaded(true);
+          setHistoryError('');
+        }
+      } catch (error) {
+        if (!stopped && error?.name !== 'AbortError') {
+          setHasLoaded(true);
+          setHistoryError(
+            error?.message || 'Không thể tải lịch sử hoạt động.',
+          );
+        }
+      }
+
+      if (!stopped) {
+        timeoutId = window.setTimeout(
+          pollHistory,
+          HISTORY_POLL_INTERVAL_MS,
+        );
+      }
     }
 
-    return subscribeToMockIotState(deviceId, setMockState);
-  }, [deviceId]);
+    pollHistory();
+
+    return () => {
+      stopped = true;
+      abortController.abort();
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
 
   return (
     <section className="history-page" aria-labelledby="history-title">
@@ -53,55 +63,30 @@ export default function HistoryPage() {
           <p className="monitor-eyebrow">Nhật ký thiết bị</p>
           <h1 id="history-title">Lịch sử hoạt động</h1>
         </div>
-        {isMockIotMode && (
-          <span className="iot-mode-badge mock">MOCK MODE</span>
-        )}
+        <span className="iot-mode-badge live">LIVE MODE</span>
       </header>
 
-      {!isMockIotMode ? (
+      {historyError && (
+        <p className="monitor-alert error" role="alert">
+          {historyError} Hệ thống sẽ tự thử lại.
+        </p>
+      )}
+
+      {!hasLoaded ? (
+        <div className="history-empty-state" role="status">
+          <h2>Đang tải lịch sử…</h2>
+          <p>Đang đọc nhật ký lệnh đã lưu trên backend.</p>
+        </div>
+      ) : items.length === 0 ? (
         <div className="history-empty-state">
-          <h2>Chưa có nguồn lịch sử tích hợp</h2>
+          <h2>Chưa có lệnh nào</h2>
           <p>
-            Trang không gọi service frontend vì backend chưa cung cấp API
-            lịch sử command/ACK.
+            Lệnh Phơi đồ hoặc Thu đồ gửi từ trang Điều khiển sẽ xuất hiện
+            tại đây sau khi backend ghi nhận.
           </p>
         </div>
       ) : (
-        <>
-          {mockState.history.length === 0 ? (
-            <div className="history-empty-state">
-              <h2>Chưa có lệnh nào</h2>
-              <p>
-                Lệnh hoàn tất, thất bại hoặc timeout từ Monitor Page sẽ xuất
-                hiện tại đây.
-              </p>
-            </div>
-          ) : (
-            <ol className="command-history-list">
-              {mockState.history.map((item) => (
-                <li className="command-history-item" key={item.command_id}>
-                  <span
-                    className={`history-result ${item.status}`}
-                  >
-                    {resultLabels[item.status] || item.status}
-                  </span>
-                  <div className="history-command-copy">
-                    <h2>{item.label}</h2>
-                    <p>
-                      {rackStateLabels[item.previous_state] || item.previous_state}
-                      {' → '}
-                      {rackStateLabels[item.final_state] || item.final_state}
-                    </p>
-                    {item.error && <p className="history-error">{item.error}</p>}
-                  </div>
-                  <time dateTime={new Date(item.completed_at).toISOString()}>
-                    {formatTimestamp(item.completed_at)}
-                  </time>
-                </li>
-              ))}
-            </ol>
-          )}
-        </>
+        <ActivityHistoryList items={items} />
       )}
     </section>
   );

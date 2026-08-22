@@ -50,11 +50,11 @@
                 }
             }
         },
-        "Input_Config": {
+        "Device_State": {
             "$device_id": {
                 ".read": "auth != null && auth.uid === $device_id",
                 ".write": "auth != null && auth.uid === $device_id && newData.exists()",
-                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'mode']) && newData.child('device_id').val() === $device_id",
+                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'mode', 'rack_state']) && newData.child('device_id').val() === $device_id",
                 "device_id": {
                     ".validate": "newData.isString()"
                 },
@@ -64,57 +64,11 @@
                 "mode": {
                     ".validate": "newData.isString() && (newData.val() === 'auto' || newData.val() === 'manual')"
                 },
-                "$other": {
-                    ".validate": false
-                }
-            }
-        },
-        "Output_State": {
-            "$device_id": {
-                ".read": "auth != null && auth.uid === $device_id",
-                ".write": false,
-                ".validate": "newData.hasChildren(['device_id', 'updated_at', 'rack_state', 'reason']) && newData.child('device_id').val() === $device_id",
-                "device_id": {
-                    ".validate": "newData.isString()"
-                },
-                "updated_at": {
-                    ".validate": "newData.isNumber() && newData.val() > 0"
-                },
                 "rack_state": {
                     ".validate": "newData.isString() && (newData.val() === 'extended' || newData.val() === 'retracted' || newData.val() === 'error')"
                 },
-                "reason": {
-                    ".validate": "newData.isString() && newData.val().length <= 200"
-                },
                 "$other": {
                     ".validate": false
-                }
-            }
-        },
-        "Output_Forecast": {
-            "$device_id": {
-                "$notification_id": {
-                    ".read": "auth != null && auth.uid === $device_id",
-                    ".write": "auth != null && auth.uid === $device_id && newData.exists()",
-                    ".validate": "newData.hasChildren(['device_id', 'notified_at', 'reason', 'forecast_within_minutes']) && newData.child('device_id').val() === $device_id",
-                    "device_id": {
-                        ".validate": "newData.isString()"
-                    },
-                    "notified_at": {
-                        ".validate": "newData.isNumber() && newData.val() > 0"
-                    },
-                    "reason": {
-                        ".validate": "newData.isString() && newData.val().length <= 200"
-                    },
-                    "rain_probability_percent": {
-                        ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
-                    },
-                    "forecast_within_minutes": {
-                        ".validate": "newData.isNumber() && newData.val() >= 0"
-                    },
-                    "$other": {
-                        ".validate": false
-                    }
                 }
             }
         }

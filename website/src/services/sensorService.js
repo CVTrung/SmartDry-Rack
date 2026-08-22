@@ -138,8 +138,16 @@ export function subscribeToSensorData({ onData, onError }) {
         await readEventStream(
           response,
           (data) => {
-            sensorDataCache.set(deviceId, data);
-            onData(data);
+            const receivedData = (
+              data !== null
+              && typeof data === 'object'
+              && !Array.isArray(data)
+            )
+              ? { ...data, received_at: Date.now() }
+              : data;
+
+            sensorDataCache.set(deviceId, receivedData);
+            onData(receivedData);
           },
           onError,
         );

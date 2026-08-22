@@ -3,10 +3,6 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { dashboardConfig } from '../config/dashboardConfig.js';
 import {
-  isMockIotMode,
-  subscribeToMockIotState,
-} from '../mocks/iotMockStore.js';
-import {
   getRainForecast,
   subscribeToRackState,
 } from '../services/dashboardStatusService.js';
@@ -35,24 +31,34 @@ function formatNumber(value, formatter = numberFormatter) {
     : '—';
 }
 
-function formatTimestamp(timestamp) {
+function getTimestampMilliseconds(timestamp) {
   const numericTimestamp = Number(timestamp);
 
   if (!Number.isFinite(numericTimestamp) || numericTimestamp <= 0) {
-    return 'Chưa có dữ liệu';
+    return Number.NaN;
   }
 
-  return timestampFormatter.format(new Date(numericTimestamp * 1000));
+  return numericTimestamp >= 1_000_000_000_000
+    ? numericTimestamp
+    : numericTimestamp * 1000;
+}
+
+function formatTimestamp(timestamp) {
+  const timestampMilliseconds = getTimestampMilliseconds(timestamp);
+
+  return Number.isFinite(timestampMilliseconds)
+    ? timestampFormatter.format(new Date(timestampMilliseconds))
+    : 'Chưa có dữ liệu';
 }
 
 function getTimestampAttribute(timestamp) {
-  const numericTimestamp = Number(timestamp);
+  const timestampMilliseconds = getTimestampMilliseconds(timestamp);
 
-  if (!Number.isFinite(numericTimestamp) || numericTimestamp <= 0) {
+  if (!Number.isFinite(timestampMilliseconds)) {
     return undefined;
   }
 
-  return new Date(numericTimestamp * 1000).toISOString();
+  return new Date(timestampMilliseconds).toISOString();
 }
 
 function getRainLabel(value) {
@@ -115,17 +121,13 @@ function getRainForecastStatus(items, error) {
   const highestProbability = Math.max(...relevantProbabilities);
   const formattedProbability = integerFormatter.format(highestProbability);
 
-  if (
-    highestProbability
-    >= dashboardConfig.rainWarningThresholdPercent
-  ) {
+  if (highestProbability >= dashboardConfig.rainWarningThresholdPercent) {
     return {
       tone: 'danger',
       label: 'CẢNH BÁO SẮP MƯA',
       detail: `${formattedProbability}%`,
     };
   }
-
   return {
     tone: 'success',
     label: 'KHÔNG MƯA',
@@ -145,11 +147,11 @@ function getRackStatus(data, hasReceivedData, error) {
   const states = {
     extended: {
       tone: 'success',
-      label: 'ĐANG PHƠI',
+      label: 'YÊU CẦU PHƠI',
     },
     retracted: {
       tone: 'danger',
-      label: 'KHÔNG PHƠI',
+      label: 'YÊU CẦU THU',
     },
     error: {
       tone: 'error',
@@ -218,25 +220,18 @@ export default function DashboardPage() {
         }
       });
 
-    const unsubscribeFromRackState = isMockIotMode
-      ? subscribeToMockIotState(user?.device_id, (state) => {
-          setRackData(state.rackState);
-          setHasReceivedRackData(true);
-          setRackError('');
-        })
-      : subscribeToRackState({
-          onData(data) {
-            setRackData(data);
-            setHasReceivedRackData(true);
-            setRackError('');
-          },
-          onError(error) {
-            setRackData(null);
-            setRackError(
-              error?.message || 'Không thể đọc trạng thái giàn phơi.',
-            );
-          },
-        });
+    const unsubscribeFromRackState = subscribeToRackState({
+      onData(data) {
+        setRackData(data);
+        setHasReceivedRackData(true);
+        setRackError('');
+      },
+      onError(error) {
+        setRackError(
+          error?.message || 'Không thể đọc trạng thái giàn phơi.',
+        );
+      },
+    });
 
     return () => {
       abortController.abort();
@@ -323,9 +318,9 @@ export default function DashboardPage() {
         </dl>
 
         <footer className="sensor-card-footer">
-          <span>Thời điểm dữ liệu cảm biến gần nhất</span>
-          <time dateTime={getTimestampAttribute(sensorData?.timestamp)}>
-            {formatTimestamp(sensorData?.timestamp)}
+          <span>Thời điểm nhận dữ liệu cảm biến gần nhất</span>
+          <time dateTime={getTimestampAttribute(sensorData?.received_at)}>
+            {formatTimestamp(sensorData?.received_at)}
           </time>
         </footer>
 

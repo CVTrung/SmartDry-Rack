@@ -6,10 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = PROJECT_ROOT / ".env"
-
 load_dotenv(ENV_FILE)
 
 
@@ -365,9 +363,3 @@ def get_settings() -> Settings:
     """Return validated backend settings."""
 
     return Settings.from_env()
-
-
-def clear_settings_cache() -> None:
-    """Clear cached settings, primarily for tests."""
-
-    get_settings.cache_clear()
